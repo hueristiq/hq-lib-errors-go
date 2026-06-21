@@ -42,7 +42,8 @@ linters:
         - godox
         - goheader
         - gomoddirectives
-        - gomodguard
+        # - gomodguard
+        - gomodguard_v2
         - goprintffuncname
         # - gosec
         # - gosmopolitan
@@ -147,4 +148,4 @@ run:
     modules-download-mode: readonly
     allow-parallel-runners: true
     allow-serial-runners: true
-    go: '1.25'
+    go: '1.26.3'

@@ -1,8 +1,8 @@
-# hq-go-errors
+# hq-lib-errors-go
 
-![made with go](https://img.shields.io/badge/made%20with-Go-1E90FF.svg) [![go report card](https://goreportcard.com/badge/github.com/hueristiq/hq-go-errors)](https://goreportcard.com/report/github.com/hueristiq/hq-go-errors) [![license](https://img.shields.io/badge/license-MIT-gray.svg?color=1E90FF)](https://github.com/hueristiq/hq-go-errors/blob/master/LICENSE) ![maintenance](https://img.shields.io/badge/maintained%3F-yes-1E90FF.svg) [![open issues](https://img.shields.io/github/issues-raw/hueristiq/hq-go-errors.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-go-errors/issues?q=is:issue+is:open) [![closed issues](https://img.shields.io/github/issues-closed-raw/hueristiq/hq-go-errors.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-go-errors/issues?q=is:issue+is:closed) [![contribution](https://img.shields.io/badge/contributions-welcome-1E90FF.svg)](https://github.com/hueristiq/hq-go-errors/blob/master/CONTRIBUTING.md)
+![made with go](https://img.shields.io/badge/made%20with-Go-1E90FF.svg) [![go report card](https://goreportcard.com/badge/github.com/hueristiq/hq-lib-errors-go)](https://goreportcard.com/report/github.com/hueristiq/hq-lib-errors-go) [![license](https://img.shields.io/badge/license-MIT-gray.svg?color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/blob/master/LICENSE) ![maintenance](https://img.shields.io/badge/maintained%3F-yes-1E90FF.svg) [![open issues](https://img.shields.io/github/issues-raw/hueristiq/hq-lib-errors-go.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/issues?q=is:issue+is:open) [![closed issues](https://img.shields.io/github/issues-closed-raw/hueristiq/hq-lib-errors-go.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/issues?q=is:issue+is:closed) [![contribution](https://img.shields.io/badge/contributions-welcome-1E90FF.svg)](https://github.com/hueristiq/hq-lib-errors-go/blob/master/CONTRIBUTING.md)
 
-`hq-go-errors` is a [Go (Golang)](http://golang.org/) package for rich, structured error handling with full stack-trace support, error wrapping, classification, and formatting.
+`hq-lib-errors-go` is a [Go (Golang)](http://golang.org/) package for rich, structured error handling with full stack-trace support, error wrapping, classification, and formatting.
 
 ## Resource
 
@@ -32,10 +32,10 @@
 
 ## Installation
 
-To install `hq-go-errors`, run the following command in your Go project:
+To install `hq-lib-errors-go`, run the following command in your Go project:
 
 ```bash
-go get -v -u github.com/hueristiq/hq-go-errors
+go get -v -u github.com/hueristiq/hq-lib-errors-go
 ```
 
 Make sure your Go environment is set up properly (Go 1.13 or later is recommended).
@@ -52,7 +52,7 @@ package main
 import (
 	"fmt"
 
-	hqgoerrors "github.com/hueristiq/hq-go-errors"
+	hqgoerrors "github.com/hueristiq/hq-lib-errors-go"
 )
 
 func main() {
@@ -73,7 +73,7 @@ package main
 import (
 	"fmt"
 
-	hqgoerrors "github.com/hueristiq/hq-go-errors"
+	hqgoerrors "github.com/hueristiq/hq-lib-errors-go"
 )
 
 func loadConfig() error {
@@ -99,7 +99,7 @@ package main
 import (
 	"fmt"
 
-	hqgoerrors "github.com/hueristiq/hq-go-errors"
+	hqgoerrors "github.com/hueristiq/hq-lib-errors-go"
 )
 
 func task1() error {
@@ -182,7 +182,7 @@ package main
 import (
 	"fmt"
 
-	hqgoerrors "github.com/hueristiq/hq-go-errors"
+	hqgoerrors "github.com/hueristiq/hq-lib-errors-go"
 )
 
 func main() {
@@ -207,12 +207,12 @@ Fields:
   FIELD_KEY_2: FIELD_VALUE_2
 
 wrap Trace:
-  main.main (/home/.../hq-go-errors/examples/basic/main.go:13)
+  main.main (/home/.../hq-lib-errors-go/examples/basic/main.go:13)
 
 wrap error example 1!
 
 wrap Trace:
-  main.main (/home/.../hq-go-errors/examples/basic/main.go:12)
+  main.main (/home/.../hq-lib-errors-go/examples/basic/main.go:12)
 
 [ERROR_TYPE] root error example!
 
@@ -221,9 +221,9 @@ Fields:
   FIELD_KEY_2: FIELD_VALUE_2
 
 root Trace:
-  main.main (/home/.../hq-go-errors/examples/basic/main.go:10)
-  main.main (/home/.../hq-go-errors/examples/basic/main.go:12)
-  main.main (/home/.../hq-go-errors/examples/basic/main.go:13)
+  main.main (/home/.../hq-lib-errors-go/examples/basic/main.go:10)
+  main.main (/home/.../hq-lib-errors-go/examples/basic/main.go:12)
+  main.main (/home/.../hq-lib-errors-go/examples/basic/main.go:13)
 ```
 
 #### ... to JSON
@@ -235,7 +235,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	hqgoerrors "github.com/hueristiq/hq-go-errors"
+	hqgoerrors "github.com/hueristiq/hq-lib-errors-go"
 )
 
 func main() {
@@ -265,7 +265,7 @@ output:
       "message": "wrap error example 2!",
       "stack": [
         {
-          "file": "/home/.../hq-go-errors/examples/basic/main.go",
+          "file": "/home/.../hq-lib-errors-go/examples/basic/main.go",
           "function": "main.main",
           "line": 13
         }
@@ -276,7 +276,7 @@ output:
       "message": "wrap error example 1!",
       "stack": [
         {
-          "file": "/home/.../hq-go-errors/examples/basic/main.go",
+          "file": "/home/.../hq-lib-errors-go/examples/basic/main.go",
           "function": "main.main",
           "line": 12
         }
@@ -291,17 +291,17 @@ output:
     "message": "root error example!",
     "stack": [
       {
-        "file": "/home/.../hq-go-errors/examples/basic/main.go",
+        "file": "/home/.../hq-lib-errors-go/examples/basic/main.go",
         "function": "main.main",
         "line": 10
       },
       {
-        "file": "/home/.../hq-go-errors/examples/basic/main.go",
+        "file": "/home/.../hq-lib-errors-go/examples/basic/main.go",
         "function": "main.main",
         "line": 12
       },
       {
-        "file": "/home/.../hq-go-errors/examples/basic/main.go",
+        "file": "/home/.../hq-lib-errors-go/examples/basic/main.go",
         "function": "main.main",
         "line": 13
       }
@@ -313,12 +313,12 @@ output:
 
 ## Contributing
 
-Contributions are welcome and encouraged! Feel free to submit [Pull Requests](https://github.com/hueristiq/hq-go-errors/pulls) or report [Issues](https://github.com/hueristiq/hq-go-errors/issues). For more details, check out the [contribution guidelines](https://github.com/hueristiq/hq-go-errors/blob/master/CONTRIBUTING.md).
+Contributions are welcome and encouraged! Feel free to submit [Pull Requests](https://github.com/hueristiq/hq-lib-errors-go/pulls) or report [Issues](https://github.com/hueristiq/hq-lib-errors-go/issues). For more details, check out the [contribution guidelines](https://github.com/hueristiq/hq-lib-errors-go/blob/master/CONTRIBUTING.md).
 
-A big thank you to all the [contributors](https://github.com/hueristiq/hq-go-errors/graphs/contributors) for your ongoing support!
+A big thank you to all the [contributors](https://github.com/hueristiq/hq-lib-errors-go/graphs/contributors) for your ongoing support!
 
-![contributors](https://contrib.rocks/image?repo=hueristiq/hq-go-errors&max=500)
+![contributors](https://contrib.rocks/image?repo=hueristiq/hq-lib-errors-go&max=500)
 
 ## Licensing
 
-This package is licensed under the [MIT license](https://opensource.org/license/mit). You are free to use, modify, and distribute it, as long as you follow the terms of the license. You can find the full license text in the repository - [Full MIT license text](https://github.com/hueristiq/hq-go-errors/blob/master/LICENSE).
+This package is licensed under the [MIT license](https://opensource.org/license/mit). You are free to use, modify, and distribute it, as long as you follow the terms of the license. You can find the full license text in the repository - [Full MIT license text](https://github.com/hueristiq/hq-lib-errors-go/blob/master/LICENSE).

@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	hqgoerrors "github.com/hueristiq/hq-go-errors"
+	hqgoerrors "github.com/hueristiq/hq-lib-errors-go"
 )
 
 func main() {
