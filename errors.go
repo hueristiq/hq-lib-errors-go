@@ -144,7 +144,7 @@ func (e *root) As(target any) (ok bool) {
 
 	val := reflect.ValueOf(target)
 
-	if val.Kind() != reflect.Ptr || val.IsNil() {
+	if val.Kind() != reflect.Pointer || val.IsNil() {
 		return
 	}
 
@@ -369,7 +369,7 @@ func (e *wrapped) As(target any) (ok bool) {
 
 	val := reflect.ValueOf(target)
 
-	if val.Kind() != reflect.Ptr || val.IsNil() {
+	if val.Kind() != reflect.Pointer || val.IsNil() {
 		return
 	}
 
@@ -853,7 +853,7 @@ func As(err error, target any) (ok bool) {
 	val := reflect.ValueOf(target)
 	typ := val.Type()
 
-	if typ.Kind() != reflect.Ptr || val.IsNil() {
+	if typ.Kind() != reflect.Pointer || val.IsNil() {
 		return
 	}
 

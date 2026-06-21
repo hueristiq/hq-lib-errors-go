@@ -164,17 +164,17 @@ func (f *Formatter) formatPartString(part *ErrPart, kind string) string {
 		buf.WriteString("\n\nFields:")
 
 		for k, v := range part.Fields {
-			buf.WriteString(fmt.Sprintf("\n%s%s:%s%v", f.options.Indentation, k, f.options.Spacing, v))
+			fmt.Fprintf(&buf, "\n%s%s:%s%v", f.options.Indentation, k, f.options.Spacing, v)
 		}
 	}
 
 	if f.options.WithTrace && len(part.Stack) > 0 {
 		frames := part.Stack
 
-		buf.WriteString(fmt.Sprintf("\n\n%s Trace:", kind))
+		fmt.Fprintf(&buf, "\n\n%s Trace:", kind)
 
 		for _, frame := range frames {
-			buf.WriteString(fmt.Sprintf("\n%s%s%s(%s:%d)", f.options.Indentation, frame.Name, f.options.Spacing, frame.File, frame.Line))
+			fmt.Fprintf(&buf, "\n%s%s%s(%s:%d)", f.options.Indentation, frame.Name, f.options.Spacing, frame.File, frame.Line)
 		}
 	}
 
@@ -208,7 +208,7 @@ func (f *Formatter) formatExternalString(err error) string {
 func (f *Formatter) formatJoinedString(joinErr *joined) string {
 	var buf strings.Builder
 
-	buf.WriteString(fmt.Sprintf("Multiple errors (%d):", len(joinErr.errors)))
+	fmt.Fprintf(&buf, "Multiple errors (%d):", len(joinErr.errors))
 
 	if f.options.WithTrace && joinErr.trace != nil {
 		frames := joinErr.trace.resolveToStackFrames()
@@ -219,7 +219,7 @@ func (f *Formatter) formatJoinedString(joinErr *joined) string {
 			if len(frames) > 0 {
 				frame := frames[0]
 
-				buf.WriteString(fmt.Sprintf("\n%s%s%s(%s:%d)", f.options.Indentation, frame.Name, f.options.Spacing, frame.File, frame.Line))
+				fmt.Fprintf(&buf, "\n%s%s%s(%s:%d)", f.options.Indentation, frame.Name, f.options.Spacing, frame.File, frame.Line)
 			}
 		}
 	}
@@ -229,7 +229,7 @@ func (f *Formatter) formatJoinedString(joinErr *joined) string {
 			continue
 		}
 
-		buf.WriteString(fmt.Sprintf("\n\n%d. %s", i+1, f.String(err)))
+		fmt.Fprintf(&buf, "\n\n%d. %s", i+1, f.String(err))
 	}
 
 	return buf.String()
@@ -259,7 +259,7 @@ func (f *Formatter) formatChainJSON(err error) map[string]any {
 	}
 
 	if len(unpacked.ErrChain) > 0 {
-		var chain []map[string]any
+		chain := make([]map[string]any, 0, len(unpacked.ErrChain))
 
 		for _, part := range unpacked.ErrChain {
 			chain = append(chain, f.formatPartJSON(&part))
@@ -301,9 +301,9 @@ func (f *Formatter) formatPartJSON(part *ErrPart) map[string]any {
 	}
 
 	if f.options.WithTrace && len(part.Stack) > 0 {
-		var frames []map[string]any
-
 		stack := part.Stack
+
+		frames := make([]map[string]any, 0, len(stack))
 
 		for _, frame := range stack {
 			frameMap := map[string]any{
@@ -347,7 +347,7 @@ func (f *Formatter) formatJoinedJSON(joinErr *joined) map[string]any {
 		frames := joinErr.trace.resolveToStackFrames()
 
 		if len(frames) > 0 {
-			var joinFrames []map[string]any
+			joinFrames := make([]map[string]any, 0, len(frames))
 
 			for _, frame := range frames {
 				joinFrames = append(joinFrames, map[string]any{
