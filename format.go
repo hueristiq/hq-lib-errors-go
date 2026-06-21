@@ -105,9 +105,9 @@ func (f *Formatter) JSON(err error) (formated map[string]any) {
 // Returns:
 //   - (string): the formatted string
 func (f *Formatter) formatChainString(err error) string {
-	unpacked := Unpack(err)
+	unpacked := unpack(err, f.options.WithTrace)
 
-	var parts []string
+	parts := make([]string, 0, len(unpacked.ErrChain)+2)
 
 	if f.options.IsInnerFirst {
 		if unpacked.ErrExternal != nil && (f.options.WithExternal || f.isOnlyExternal(&unpacked)) {
@@ -244,7 +244,7 @@ func (f *Formatter) formatJoinedString(joinErr *joined) string {
 // Returns:
 //   - (map[string]any): the formatted map
 func (f *Formatter) formatChainJSON(err error) map[string]any {
-	unpacked := Unpack(err)
+	unpacked := unpack(err, f.options.WithTrace)
 	result := make(map[string]any)
 
 	if unpacked.ErrExternal != nil && (f.options.WithExternal || f.isOnlyExternal(&unpacked)) {
@@ -375,15 +375,17 @@ func (f *Formatter) formatJoinedJSON(joinErr *joined) map[string]any {
 }
 
 // hasRootContent checks if the root ErrPart has any meaningful content.
-// Used to decide whether to include the root in formatting.
+// Used to decide whether to include the root in formatting. It does not depend
+// on the stack being resolved, so the decision is stable whether or not traces
+// are enabled.
 //
 // Parameters:
 //   - root (*ErrPart): the root part to check
 //
 // Returns:
-//   - (bool): true if it has a message or stack frames
+//   - (bool): true if it has a message, type, fields, or stack frames
 func (f *Formatter) hasRootContent(root *ErrPart) bool {
-	return root.Message != "" || len(root.Stack) > 0
+	return root.Message != "" || root.Type != "" || len(root.Fields) > 0 || len(root.Stack) > 0
 }
 
 // isOnlyExternal checks if the unpacked error consists only of an external error.
@@ -457,7 +459,7 @@ func FormatWithTrace() (f FormatterOptionFunc) {
 	}
 }
 
-// Unpack decomposes an error into its parts.
+// Unpack decomposes an error into its parts, resolving stack traces.
 // It handles joined, root, wrapped, and external errors.
 //
 // The unpacking process:
@@ -472,6 +474,21 @@ func FormatWithTrace() (f FormatterOptionFunc) {
 // Returns:
 //   - uerr (UnpackedError): the unpacked structure
 func Unpack(err error) (uerr UnpackedError) {
+	return unpack(err, true)
+}
+
+// unpack is the internal implementation of Unpack. Symbolizing program counters
+// into file/line/function is the expensive part of unpacking, so resolveStacks
+// gates it: callers that will not render traces (Formatter with WithTrace false)
+// pass false and skip the work entirely.
+//
+// Parameters:
+//   - err (error): the error to unpack
+//   - resolveStacks (bool): whether to resolve stack frames into ErrPart.Stack
+//
+// Returns:
+//   - uerr (UnpackedError): the unpacked structure
+func unpack(err error, resolveStacks bool) (uerr UnpackedError) {
 	if joinErr, ok := err.(*joined); ok {
 		uerr.ErrJoined = joinErr.errors
 
@@ -482,22 +499,22 @@ func Unpack(err error) (uerr UnpackedError) {
 		switch e := err.(type) {
 		case *root:
 			uerr.ErrRoot = ErrPart{
-				Type:    e.errType,
+				Type:    e.Type(),
 				Message: e.message,
-				Fields:  e.fields,
+				Fields:  e.Fields(),
 			}
 
-			if e.trace != nil {
+			if resolveStacks && e.trace != nil {
 				uerr.ErrRoot.Stack = e.trace.resolveToStackFrames()
 			}
 		case *wrapped:
 			part := ErrPart{
-				Type:    e.errType,
+				Type:    e.Type(),
 				Message: e.message,
-				Fields:  e.fields,
+				Fields:  e.Fields(),
 			}
 
-			if e.frame != nil {
+			if resolveStacks && e.frame != nil {
 				part.Stack = Stack{e.frame.resolveToStackFrame()}
 			}
 

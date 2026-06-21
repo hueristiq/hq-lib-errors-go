@@ -124,14 +124,10 @@ func (f frame) resolveToStackFrame() (stackFrame StackFrame) {
 	return
 }
 
-// stack represents a slice of PCs (program counters) recorded from the call stack.
-// Internally, it captures raw PCs so that error-handling code can later resolve
-// and format a complete backtrace, making it easier to pinpoint failure points.
-//
-// The stack type provides methods for:
-//   - Resolving PCs to human-readable frames
-//   - Detecting initialization-time errors
-//   - Inserting additional program counters for error wrapping
+// stack is a slice of raw program counters recorded from the call stack at the
+// point an error was created. Storing unresolved PCs keeps capture cheap; they
+// are turned into human-readable frames on demand by resolveToStackFrames, only
+// when an error is actually formatted with traces enabled.
 type stack []uintptr
 
 // resolveToStackFrames resolves the recorded PCs into a slice of detailed StackFrame objects.
@@ -171,84 +167,6 @@ func (s *stack) resolveToStackFrames() (stackFrameObjects []StackFrame) {
 
 		if !more {
 			break
-		}
-	}
-
-	return
-}
-
-// insertPC integrates additional PCs into the existing stack trace.
-// It supports two scenarios:
-//   - Single-PC insertion: appends a marker (e.g., an error-wrap point)
-//   - Dual-PC insertion: locates the context frame then injects the wrapper frame
-//     immediately before it, preserving logical call ordering
-//
-// The insertion logic:
-//  1. For single PC, simply appends to the end of the stack
-//  2. For dual PCs, searches for the second PC in the existing stack
-//     and inserts the first PC before it if found
-//
-// If the wrapPCs slice is empty, no changes are made. If the target PC for dual insertion
-// is not found, no insertion occurs.
-//
-// Parameters:
-//   - wrapPCs (stack): program counters to be merged into the current stack.
-func (s *stack) insertPC(wrapPCs stack) {
-	if len(wrapPCs) == 0 {
-		return
-	}
-
-	if len(wrapPCs) == 1 {
-		*s = append(*s, wrapPCs[0])
-
-		return
-	}
-
-	for i, pc := range *s {
-		if pc == wrapPCs[0] {
-			break
-		}
-
-		if pc == wrapPCs[1] {
-			*s = insert(*s, wrapPCs[0], i)
-
-			break
-		}
-	}
-}
-
-// insert is a helper function that inserts a single uintptr value into a stack slice at a specified index.
-// It creates a new slice with the inserted element while preserving the order of existing elements.
-//
-// Parameters:
-//   - s (stack): the original stack slice to modify
-//   - u (uintptr): the program counter value to insert
-//   - i (int): the index at which to insert the value (must be within 0 to len(s))
-//
-// Returns:
-//   - (stack): a new stack slice with the inserted element
-func insert(s stack, u uintptr, i int) stack {
-	return append(s[:i], append([]uintptr{u}, s[i:]...)...)
-}
-
-// isGlobal checks if the captured call stack includes a global init invocation.
-// This is useful to detect whether an error occurred during package initialization
-// rather than at runtime business logic. It examines each frame's function name
-// looking for runtime initialization markers.
-//
-// The check iterates over resolved frames and looks for a specific runtime function name
-// indicating initialization (case-insensitive comparison).
-//
-// Returns:
-//   - isGlobal (bool): true if the stack originates from a global init function, false otherwise
-func (s *stack) isGlobal() (isGlobal bool) {
-	frames := s.resolveToStackFrames()
-
-	for _, f := range frames {
-		if strings.EqualFold(f.Name, "runtime.doinit") {
-			isGlobal = true
-
-			return
 		}
 	}
 

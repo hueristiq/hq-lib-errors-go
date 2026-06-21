@@ -2,9 +2,9 @@
 
 ![made with go](https://img.shields.io/badge/made%20with-Go-1E90FF.svg) [![go report card](https://goreportcard.com/badge/github.com/hueristiq/hq-lib-errors-go)](https://goreportcard.com/report/github.com/hueristiq/hq-lib-errors-go) [![license](https://img.shields.io/badge/license-MIT-gray.svg?color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/blob/master/LICENSE) ![maintenance](https://img.shields.io/badge/maintained%3F-yes-1E90FF.svg) [![open issues](https://img.shields.io/github/issues-raw/hueristiq/hq-lib-errors-go.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/issues?q=is:issue+is:open) [![closed issues](https://img.shields.io/github/issues-closed-raw/hueristiq/hq-lib-errors-go.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/issues?q=is:issue+is:closed) [![contribution](https://img.shields.io/badge/contributions-welcome-1E90FF.svg)](https://github.com/hueristiq/hq-lib-errors-go/blob/master/CONTRIBUTING.md)
 
-`hq-lib-errors-go` is a [Go (Golang)](http://golang.org/) package for rich, structured error handling with full stack-trace support, error wrapping, classification, and formatting.
+`hq-lib-errors-go` is a [Go (Golang)](http://golang.org/) package for rich, structured error handling: stack traces, error wrapping, type classification, structured fields, and multi-error aggregation. It is a drop-in superset of the standard library's `errors` package, so `Is`, `As`, `Unwrap`, and `Join` keep working exactly as you expect — with `Cause` added for root-cause analysis.
 
-## Resource
+## Resources
 
 - [Features](#features)
 - [Installation](#installation)
@@ -12,7 +12,7 @@
 	- [Creating Errors](#creating-errors)
 	- [Wrapping Errors](#wrapping-errors)
 	- [Joining Multiple Errors](#joining-multiple-errors)
-	- [Structured Types & Fields](#structured-types--fields)
+	- [Types & Structured Fields](#types--structured-fields)
 	- [Unwrapping, `Is`, `As`, and `Cause`](#unwrapping-is-as-and-cause)
 	- [Formatting Errors](#formatting-errors)
 		- [... to String](#-to-string)
@@ -22,13 +22,14 @@
 
 ## Features
 
-- **Full Stack Traces:** Capture detailed call stacks at error creation and wrap points, with customizable formatting (e.g., reverse order, separators).
-- **Error Chaining:** Wrap errors to add context while preserving the original stack trace and error details.
-- **Error Classification:** Assign `ErrorType` values to categorize errors for programmatic handling.
-- **Structured Fields:** Attach arbitrary key-value metadata (e.g., request IDs, parameters) to errors for enhanced debugging.
-- **Multi-Error Support:** Join multiple errors into a single error object with a shared stack trace.
-- **Flexible Formatting:** Render errors as human-readable strings or JSON-like maps, with options to include/exclude stack traces, invert chain order, or handle external errors.
-- **Standards-Compliant:** Implements Go’s standard `error`, `Unwrap`, `Is`, and `As` interfaces, plus additional helpers like `Cause` for root cause analysis.
+- **Stack traces** — every error captures where it was created; raw program counters are stored at the call site and resolved to file/line/function lazily, only when an error is formatted with traces enabled, so error creation stays cheap.
+- **Error wrapping** — add context as an error propagates while preserving the original error and its trace. Wrapping never mutates the wrapped error.
+- **Type classification** — tag errors with a `Type` for programmatic handling.
+- **Structured fields** — attach arbitrary key-value metadata (request IDs, parameters, …) for richer debugging and structured logs.
+- **Multi-error aggregation** — `Join` combines several errors into one that unwraps to all of them and records where the join happened.
+- **Flexible formatting** — render an error chain as a human-readable string or a JSON-ready map, with options to include/exclude stack traces, invert order, or include external errors.
+- **Standards-compliant** — implements `error`, `Unwrap`, `Is`, and `As`, and interoperates with errors from any source.
+- **Concurrency-safe** — errors are safe to share, format, and inspect across goroutines.
 
 ## Installation
 
@@ -38,13 +39,19 @@ To install `hq-lib-errors-go`, run the following command in your Go project:
 go get -v -u github.com/hueristiq/hq-lib-errors-go
 ```
 
-Make sure your Go environment is set up properly (Go 1.13 or later is recommended).
+This package targets the Go toolchain declared in [`go.mod`](go.mod) (Go 1.26 or later).
 
 ## Usage
 
+The examples below import the package under the `hqgoerrors` alias. Runnable programs live in the [`examples/`](examples) directory.
+
+```go
+import hqgoerrors "github.com/hueristiq/hq-lib-errors-go"
+```
+
 ### Creating Errors
 
-Use `New` to create a root error with a full call stack captured at the point of invocation.
+Use `New` to create a root error. A stack trace is captured at the point of invocation.
 
 ```go
 package main
@@ -65,7 +72,7 @@ func main() {
 
 ### Wrapping Errors
 
-Use `Wrap` to add context to an existing error, capturing a single stack frame at the wrap point while preserving the original error’s stack trace.
+Use `Wrap` to add context to an existing error. The new error captures its own wrap-site frame; the wrapped error is referenced as-is and is **never mutated**, so wrapping a shared or sentinel error is safe.
 
 ```go
 package main
@@ -84,14 +91,14 @@ func main() {
 	if err := loadConfig(); err != nil {
 		err = hqgoerrors.Wrap(err, "failed to load configuration")
 
-		fmt.Println(err.Error())
+		fmt.Println(err.Error()) // failed to load configuration: cannot read config file
 	}
 }
 ```
 
 ### Joining Multiple Errors
 
-Use `Join` to combine multiple errors into a single error object, capturing a stack trace at the join point.
+Use `Join` to combine multiple errors into one. `nil` errors are dropped, and a single non-nil error is returned unchanged. The joined error unwraps to all of its members and captures a stack trace at the join point.
 
 ```go
 package main
@@ -102,28 +109,22 @@ import (
 	hqgoerrors "github.com/hueristiq/hq-lib-errors-go"
 )
 
-func task1() error {
-	return hqgoerrors.New("task 1 failed")
-}
-
-func task2() error {
-	return hqgoerrors.New("task 2 failed")
-}
-
 func main() {
-	err1 := task1()
-	err2 := task2()
-
-	err := hqgoerrors.Join(err1, err2)
+	err := hqgoerrors.Join(
+		hqgoerrors.New("name is required"),
+		hqgoerrors.New("age must be positive"),
+	)
 	if err != nil {
 		fmt.Println(err.Error())
+		// name is required
+		// age must be positive
 	}
 }
 ```
 
-### Structured Types & Fields
+### Types & Structured Fields
 
-You can classify errors and attach structured data:
+Classify errors and attach structured data at creation with the `WithType` and `WithField` options:
 
 ```go
 err := hqgoerrors.New("payment declined",
@@ -133,46 +134,54 @@ err := hqgoerrors.New("payment declined",
 )
 ```
 
-- Retrieve:
+Errors created by this package satisfy the `hqgoerrors.Error` interface. Recover it from an opaque `error` with `As` (or a type assertion) to read the type and fields:
 
-	```go
-	if e, ok := err.(hqgoerrors.Error); ok {
-		fmt.Println("Type:", e.Type())
-		fmt.Println("Fields:", e.Fields())
-	}
-	```
+```go
+var e hqgoerrors.Error
+if hqgoerrors.As(err, &e) {
+	fmt.Println("Type:", e.Type())     // PaymentError
+	fmt.Println("Fields:", e.Fields()) // map[amount:49.95 order_id:1234]
+}
+```
+
+`Fields()` returns a snapshot copy, so it is safe to read while the error is mutated concurrently, and mutating the returned map does not affect the error. The type and fields can also be set after creation with `e.SetType(...)` and `e.SetField(...)`, which return the error for chaining.
 
 ### Unwrapping, `Is`, `As`, and `Cause`
 
-- Standard Unwrap:
+These mirror the standard library and traverse the whole chain, including the branches of a joined error.
+
+- **Unwrap** the next error in the chain:
 
 	```go
 	next := hqgoerrors.Unwrap(err)
 	```
 
-- Deep equality:
+- **`Is`** reports whether a sentinel appears anywhere in the chain:
 
 	```go
-	if hqgoerrors.Is(err, targetErr) { … }
-	```
-
-- Type assertion:
-
-	```go
-	var myErr *hqgoerrors.Error
-
-	if hqgoerrors.As(err, &myErr) {
-		fmt.Println("Got:", myErr.Msg)
+	if hqgoerrors.Is(err, ErrNotFound) {
+		// ...
 	}
 	```
 
-- Root cause:
+- **`As`** finds the first error in the chain assignable to the target and assigns it:
+
+	```go
+	var e hqgoerrors.Error
+	if hqgoerrors.As(err, &e) {
+		fmt.Println("Type:", e.Type())
+	}
+	```
+
+- **`Cause`** returns the deepest error in the chain (the original root cause):
 
 	```go
 	cause := hqgoerrors.Cause(err)
 	```
 
 ### Formatting Errors
+
+`ToString`, `ToJSON`, and `ToJSONString` render an error chain. Stack traces are **omitted by default**; enable them with the `FormatWithTrace` option. For finer control over ordering, indentation, and trace inclusion, build a `Formatter` with `NewFormatter`.
 
 #### ... to String
 
@@ -222,17 +231,16 @@ Fields:
 
 root Trace:
   main.main (/home/.../hq-lib-errors-go/examples/basic/main.go:10)
-  main.main (/home/.../hq-lib-errors-go/examples/basic/main.go:12)
-  main.main (/home/.../hq-lib-errors-go/examples/basic/main.go:13)
 ```
 
 #### ... to JSON
+
+`ToJSON` returns a `map[string]any` ready for `json.Marshal`; `ToJSONString` marshals it for you with indentation.
 
 ```go
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 
 	hqgoerrors "github.com/hueristiq/hq-lib-errors-go"
@@ -244,11 +252,9 @@ func main() {
 	err = hqgoerrors.Wrap(err, "wrap error example 1!")
 	err = hqgoerrors.Wrap(err, "wrap error example 2!", hqgoerrors.WithType("ERROR_TYPE_2"), hqgoerrors.WithField("FIELD_KEY_1", "FIELD_VALUE_1"), hqgoerrors.WithField("FIELD_KEY_2", "FIELD_VALUE_2"))
 
-	formattedJSON := hqgoerrors.ToJSON(err, hqgoerrors.FormatWithTrace())
+	formattedJSON := hqgoerrors.ToJSONString(err, hqgoerrors.FormatWithTrace())
 
-	bytes, _ := json.Marshal(formattedJSON)
-
-	fmt.Println(string(bytes))
+	fmt.Println(formattedJSON)
 }
 ```
 
@@ -294,16 +300,6 @@ output:
         "file": "/home/.../hq-lib-errors-go/examples/basic/main.go",
         "function": "main.main",
         "line": 10
-      },
-      {
-        "file": "/home/.../hq-lib-errors-go/examples/basic/main.go",
-        "function": "main.main",
-        "line": 12
-      },
-      {
-        "file": "/home/.../hq-lib-errors-go/examples/basic/main.go",
-        "function": "main.main",
-        "line": 13
       }
     ],
     "type": "ERROR_TYPE"
