@@ -10,140 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestStackFrame_format(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name      string
-		frame     StackFrame
-		separator string
-		expected  string
-	}{
-		{
-			name: "basic format",
-			frame: StackFrame{
-				Name: "functionName",
-				File: "/path/to/file.go",
-				Line: 42,
-			},
-			separator: "|",
-			expected:  "functionName|/path/to/file.go|42",
-		},
-		{
-			name: "empty values",
-			frame: StackFrame{
-				Name: "",
-				File: "",
-				Line: 0,
-			},
-			separator: ",",
-			expected:  ",,0",
-		},
-		{
-			name: "special characters in name",
-			frame: StackFrame{
-				Name: "pkg.(*Type).Method",
-				File: "/path with spaces/file.go",
-				Line: 100,
-			},
-			separator: " ",
-			expected:  "pkg.(*Type).Method /path with spaces/file.go 100",
-		},
-		{
-			name: "separator with special chars",
-			frame: StackFrame{
-				Name: "func",
-				File: "file.go",
-				Line: 1,
-			},
-			separator: "\t-\t",
-			expected:  "func\t-\tfile.go\t-\t1",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			result := tt.frame.format(tt.separator)
-
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestStack_format(t *testing.T) {
-	t.Parallel()
-
-	frames := Stack{
-		{Name: "func1", File: "file1.go", Line: 1},
-		{Name: "func2", File: "file2.go", Line: 2},
-		{Name: "func3", File: "file3.go", Line: 3},
-	}
-
-	tests := []struct {
-		name      string
-		stack     Stack
-		separator string
-		invert    bool
-		expected  []string
-	}{
-		{
-			name:      "natural order",
-			stack:     frames,
-			separator: " ",
-			invert:    false,
-			expected: []string{
-				"func3 file3.go 3",
-				"func2 file2.go 2",
-				"func1 file1.go 1",
-			},
-		},
-		{
-			name:      "reverse order",
-			stack:     frames,
-			separator: "\t",
-			invert:    true,
-			expected: []string{
-				"func1\tfile1.go\t1",
-				"func2\tfile2.go\t2",
-				"func3\tfile3.go\t3",
-			},
-		},
-		{
-			name:      "empty stack",
-			stack:     Stack{},
-			separator: "|",
-			invert:    false,
-			expected:  []string{},
-		},
-		{
-			name:      "single frame natural",
-			stack:     Stack{{Name: "func", File: "file.go", Line: 1}},
-			separator: ",",
-			invert:    false,
-			expected:  []string{"func,file.go,1"},
-		},
-		{
-			name:      "single frame reverse",
-			stack:     Stack{{Name: "func", File: "file.go", Line: 1}},
-			separator: ",",
-			invert:    true,
-			expected:  []string{"func,file.go,1"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			result := tt.stack.format(tt.separator, tt.invert)
-
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestFrame_pc(t *testing.T) {
 	t.Parallel()
 
@@ -199,21 +65,29 @@ func TestStack_resolveToStackFrames(t *testing.T) {
 
 	frames := runtime.CallersFrames(pcs[:n])
 
-	for i := 0; ; i++ {
+	i := 0
+
+	for {
 		runtimeFrame, more := frames.Next()
 
-		require.Less(t, i, len(result), "More frames from runtime than from resolveToStackFrames")
+		// resolveToStackFrames drops runtime-internal frames, so only
+		// non-runtime frames are compared against its output.
+		if !strings.HasPrefix(runtimeFrame.Function, "runtime.") {
+			require.Less(t, i, len(result), "More non-runtime frames from runtime than from resolveToStackFrames")
 
-		assert.Equal(t, filepath.Base(runtimeFrame.Function), filepath.Base(result[i].Name))
-		assert.Equal(t, runtimeFrame.File, result[i].File)
-		assert.Equal(t, runtimeFrame.Line, result[i].Line)
+			assert.Equal(t, filepath.Base(runtimeFrame.Function), filepath.Base(result[i].Name))
+			assert.Equal(t, runtimeFrame.File, result[i].File)
+			assert.Equal(t, runtimeFrame.Line, result[i].Line)
+
+			i++
+		}
 
 		if !more {
 			break
 		}
 	}
 
-	assert.Len(t, result, n, "Should have same number of frames as input PCs")
+	assert.Len(t, result, i, "Should have one frame per non-runtime input PC")
 }
 
 func TestCaller(t *testing.T) {
@@ -250,7 +124,7 @@ func TestCallers(t *testing.T) {
 	frames := result.resolveToStackFrames()
 
 	for _, frame := range frames {
-		assert.False(t, strings.HasPrefix(frame.Name, "runtime."), "Should filter out runtime frames")
+		assert.False(t, strings.HasPrefix(frame.Name, "runtime."), "Resolution should filter out runtime frames")
 	}
 
 	innerResult := callers(2)

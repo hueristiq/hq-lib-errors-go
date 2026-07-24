@@ -784,7 +784,7 @@ func TestJoinedMethods(t *testing.T) {
 	t.Run("error skips nil entries", func(t *testing.T) {
 		t.Parallel()
 
-		e := &joined{errors: []error{New("a"), nil, New("b")}}
+		e := &joined{errs: []error{New("a"), nil, New("b")}}
 
 		assert.Equal(t, "a\nb", e.Error())
 	})
@@ -800,7 +800,7 @@ func TestJoinedMethods(t *testing.T) {
 	t.Run("stack frames nil trace", func(t *testing.T) {
 		t.Parallel()
 
-		e := &joined{errors: []error{New("a")}}
+		e := &joined{errs: []error{New("a")}}
 
 		assert.Empty(t, e.StackFrames())
 	})
@@ -987,4 +987,121 @@ func (e *multiError) Error() string {
 
 func (e *multiError) Unwrap() []error {
 	return e.errs
+}
+
+func TestWrapNilCauseWithOptions(t *testing.T) {
+	t.Parallel()
+
+	assert.NoError(t, Wrap(nil, "ctx", WithType("T"), WithField("k", "v")), "wrapping nil must return nil even with options")
+}
+
+func TestIsConcurrentWithTargetSetType(t *testing.T) {
+	t.Parallel()
+
+	t.Run("root", func(t *testing.T) {
+		t.Parallel()
+
+		target := New("x", WithType("A"))
+		err := New("x", WithType("A"))
+
+		var wg sync.WaitGroup
+
+		for range 50 {
+			wg.Go(func() {
+				target.(Error).SetType("B")
+			})
+
+			wg.Go(func() {
+				_ = Is(err, target)
+			})
+		}
+
+		wg.Wait()
+	})
+
+	t.Run("wrapped", func(t *testing.T) {
+		t.Parallel()
+
+		target := Wrap(New("base"), "ctx", WithType("A"))
+		err := Wrap(New("base"), "ctx", WithType("A"))
+
+		var wg sync.WaitGroup
+
+		for range 50 {
+			wg.Go(func() {
+				target.(Error).SetType("B")
+			})
+
+			wg.Go(func() {
+				_ = Is(err, target)
+			})
+		}
+
+		wg.Wait()
+	})
+}
+
+func TestIsTypedNilTarget(t *testing.T) {
+	t.Parallel()
+
+	err := New("x")
+
+	var nilRoot *root
+
+	var nilWrapped *wrapped
+
+	assert.False(t, Is(err, nilRoot), "typed-nil *root target must not match or panic")
+	assert.False(t, Is(err, nilWrapped), "typed-nil *wrapped target must not match or panic")
+	assert.False(t, err.(*root).Is(nilRoot), "typed-nil *root target must not match or panic")
+	assert.False(t, nilRoot.Is(err.(*root)), "nil receiver with non-nil target must not match or panic")
+	assert.False(t, nilWrapped.Is(Wrap(New("y"), "ctx").(*wrapped)), "nil receiver with non-nil target must not match or panic")
+}
+
+func TestErrorEmptyMessageWithCause(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "inner", Wrap(New("inner"), "").Error(), "no leading colon for empty message")
+	assert.Equal(t, "outer: inner", Wrap(New("inner"), "outer").Error())
+}
+
+func TestStackFramesReturnsCopy(t *testing.T) {
+	t.Parallel()
+
+	t.Run("root", func(t *testing.T) {
+		t.Parallel()
+
+		err := New("x").(*root)
+
+		frames := err.StackFrames()
+		require.NotEmpty(t, frames)
+
+		original := frames[0]
+		frames[0] = 0
+
+		assert.Equal(t, original, err.StackFrames()[0], "mutating the returned slice must not affect the error")
+	})
+
+	t.Run("joined", func(t *testing.T) {
+		t.Parallel()
+
+		err := Join(New("a"), New("b")).(*joined)
+
+		frames := err.StackFrames()
+		require.NotEmpty(t, frames)
+
+		original := frames[0]
+		frames[0] = 0
+
+		assert.Equal(t, original, err.StackFrames()[0], "mutating the returned slice must not affect the error")
+	})
+}
+
+func TestNilOptionFuncsIgnored(t *testing.T) {
+	t.Parallel()
+
+	assert.NotPanics(t, func() {
+		_ = New("x", nil)
+		_ = Wrap(New("y"), "ctx", nil)
+		_ = NewFormatter(nil)
+	})
 }

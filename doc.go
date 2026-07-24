@@ -4,7 +4,9 @@
 //
 // It is a drop-in superset of the standard library's errors package. [Is], [As],
 // [Unwrap], and [Join] mirror their standard counterparts and interoperate with
-// errors from any source; [Cause] is added for root-cause analysis.
+// errors from any source; [Cause] is added for root-cause analysis. One
+// deliberate deviation: [Join] returns a single non-nil error unchanged instead
+// of wrapping it, so the returned value keeps its original identity.
 //
 // # Creating errors
 //

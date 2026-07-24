@@ -2,19 +2,12 @@ package errors
 
 import (
 	stderrors "errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func innerFirst(o *FormatterOptions) {
-	o.IsInnerFirst = true
-}
-
-func withoutExternal(o *FormatterOptions) {
-	o.WithExternal = false
-}
 
 func TestNewFormatter(t *testing.T) {
 	t.Parallel()
@@ -35,12 +28,23 @@ func TestNewFormatter(t *testing.T) {
 	t.Run("applies options", func(t *testing.T) {
 		t.Parallel()
 
-		f := NewFormatter(FormatWithTrace(), innerFirst, withoutExternal)
+		f := NewFormatter(FormatWithTrace(), FormatWithInnerFirst(), FormatWithoutExternal())
 
 		assert.True(t, f.options.WithTrace)
 		assert.True(t, f.options.IsInnerFirst)
 		assert.False(t, f.options.WithExternal)
 	})
+}
+
+func TestFormatterOptionConstructors(t *testing.T) {
+	t.Parallel()
+
+	f := NewFormatter(FormatWithTrace(), FormatWithInnerFirst(), FormatWithoutExternal(), FormatWithInvertedTrace())
+
+	assert.True(t, f.options.WithTrace)
+	assert.True(t, f.options.IsInnerFirst)
+	assert.False(t, f.options.WithExternal)
+	assert.True(t, f.options.InvertTrace)
 }
 
 func TestFormatWithTrace(t *testing.T) {
@@ -121,6 +125,20 @@ func TestUnpack(t *testing.T) {
 	})
 }
 
+func TestUnpackStopsAtFirstExternal(t *testing.T) {
+	t.Parallel()
+
+	base := New("root-msg", WithType("ROOT"))
+	mid := fmt.Errorf("fmt ctx: %w", base)
+	top := Wrap(mid, "top")
+
+	u := Unpack(top)
+
+	assert.Equal(t, "top", u.ErrRoot.Message)
+	assert.Empty(t, u.ErrChain)
+	assert.Equal(t, mid, u.ErrExternal, "traversal stops at the first non-package error")
+}
+
 func TestUnpackResolveStacksGate(t *testing.T) {
 	t.Parallel()
 
@@ -180,7 +198,7 @@ func TestToString(t *testing.T) {
 		{
 			name:     "double wrap inner first",
 			err:      Wrap(Wrap(New("root"), "w1"), "w2"),
-			opts:     []FormatterOptionFunc{innerFirst},
+			opts:     []FormatterOptionFunc{FormatWithInnerFirst()},
 			expected: "root\n\nw1\n\nw2",
 		},
 		{
@@ -196,19 +214,19 @@ func TestToString(t *testing.T) {
 		{
 			name:     "root and external without external",
 			err:      Wrap(stdErr, "wrap"),
-			opts:     []FormatterOptionFunc{withoutExternal},
+			opts:     []FormatterOptionFunc{FormatWithoutExternal()},
 			expected: "wrap",
 		},
 		{
 			name:     "root and external inner first",
 			err:      Wrap(stdErr, "wrap"),
-			opts:     []FormatterOptionFunc{innerFirst},
+			opts:     []FormatterOptionFunc{FormatWithInnerFirst()},
 			expected: "ext\n\nwrap",
 		},
 		{
 			name:     "external only is shown even without external",
 			err:      stdErr,
-			opts:     []FormatterOptionFunc{withoutExternal},
+			opts:     []FormatterOptionFunc{FormatWithoutExternal()},
 			expected: "ext",
 		},
 		{
@@ -225,6 +243,14 @@ func TestToString(t *testing.T) {
 			assert.Equal(t, tt.expected, ToString(tt.err, tt.opts...))
 		})
 	}
+}
+
+func TestToStringFieldsSorted(t *testing.T) {
+	t.Parallel()
+
+	err := New("boom", WithField("z", 1), WithField("a", 2), WithField("m", 3))
+
+	assert.Equal(t, "boom\n\nFields:\n  a: 2\n  m: 3\n  z: 1", ToString(err), "fields must render in sorted key order")
 }
 
 func TestToStringWithTrace(t *testing.T) {
@@ -250,7 +276,7 @@ func TestToStringJoinedWithTrace(t *testing.T) {
 func TestToStringJoinedSkipsNilEntry(t *testing.T) {
 	t.Parallel()
 
-	j := &joined{errors: []error{New("a"), nil, New("b")}}
+	j := &joined{errs: []error{New("a"), nil, New("b")}}
 
 	out := ToString(j)
 
@@ -416,7 +442,7 @@ func TestFormatterInvertTrace(t *testing.T) {
 	err := New("trace me")
 
 	normal := ToJSON(err, FormatWithTrace())
-	inverted := ToJSON(err, FormatWithTrace(), func(o *FormatterOptions) { o.InvertTrace = true })
+	inverted := ToJSON(err, FormatWithTrace(), FormatWithInvertedTrace())
 
 	normalStack := normal["root"].(map[string]any)["stack"].([]map[string]any)
 	invertedStack := inverted["root"].(map[string]any)["stack"].([]map[string]any)
@@ -435,7 +461,7 @@ func TestFormatterIsInnerFirstJSON(t *testing.T) {
 	err := Wrap(Wrap(New("root"), "w1"), "w2")
 
 	normalChain := ToJSON(err)["chain"].([]map[string]any)
-	innerChain := ToJSON(err, innerFirst)["chain"].([]map[string]any)
+	innerChain := ToJSON(err, FormatWithInnerFirst())["chain"].([]map[string]any)
 
 	require.Len(t, normalChain, 2)
 	require.Len(t, innerChain, 2)
