@@ -1,7 +1,9 @@
 package errors
 
 import (
+	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -9,33 +11,38 @@ import (
 // root represents a fundamental error with complete stack trace information.
 // It serves as the base error type in the package and implements the Error interface.
 //
+// A root is immutable once returned by New except through SetType and SetField,
+// which are guarded by mu. In particular, wrapping a root never mutates it.
+//
 // Fields:
 //   - mu (sync.RWMutex): mutex for thread-safe access to modifiable fields
-//   - isGlobal (bool): indicates if error occurred during package initialization
 //   - errType (Type): error type for classification (Type)
 //   - message (string): human-readable error message
 //   - fields (map[string]any): additional structured context (key-value pairs)
 //   - cause (error): the underlying error being wrapped (if any)
 //   - trace (*stack): captured call stack information
 type root struct {
-	mu       sync.RWMutex
-	isGlobal bool
-	errType  Type
-	message  string
-	fields   map[string]any
-	cause    error
-	trace    *stack
+	mu      sync.RWMutex
+	errType Type
+	message string
+	fields  map[string]any
+	cause   error
+	trace   *stack
 }
 
-// Type returns the error's classification type if one was set.
-// It safely reads the errType field.
+// Type returns the error's classification type, or the empty Type if none was
+// set. The read is taken under the read lock, so it is safe to call concurrently
+// with [root.SetType].
 //
 // Returns:
-//   - errType (Type): the error's type, or empty string if untyped or receiver is nil
+//   - errType (Type): the error's type, or empty string if untyped or the receiver is nil.
 func (e *root) Type() (errType Type) {
 	if e == nil {
 		return
 	}
+
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 
 	errType = e.errType
 
@@ -43,37 +50,44 @@ func (e *root) Type() (errType Type) {
 }
 
 // Error implements the error interface, returning the error message.
-// If the error wraps another error, it combines both messages.
+// If the error wraps another error, it combines both messages, joining them
+// with ": " only when the message itself is non-empty.
 //
 // Returns:
 //   - msg (string): the error message (or "<nil>" if receiver is nil)
 func (e *root) Error() (msg string) {
-	msg = "<nil>"
-
 	if e == nil {
-		return
+		return "<nil>"
 	}
 
 	msg = e.message
 
 	if e.cause != nil {
-		msg += ": " + e.cause.Error()
+		if msg != "" {
+			msg += ": "
+		}
+
+		msg += e.cause.Error()
 	}
 
-	return
+	return msg
 }
 
-// Fields returns all structured fields attached to the error.
-// The returned map should not be modified directly.
+// Fields returns a snapshot copy of all structured fields attached to the error.
+// The copy is taken under the read lock, so it is safe to read concurrently with
+// SetField; mutating the returned map does not affect the error.
 //
 // Returns:
-//   - fields (map[string]any): all attached fields (may be nil) or nil if receiver is nil
+//   - fields (map[string]any): a copy of the attached fields (nil if none or if receiver is nil)
 func (e *root) Fields() (fields map[string]any) {
 	if e == nil {
 		return
 	}
 
-	fields = e.fields
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	fields = maps.Clone(e.fields)
 
 	return
 }
@@ -81,25 +95,26 @@ func (e *root) Fields() (fields map[string]any) {
 // StackFrames returns the raw PCs (program counters) from the call stack.
 // These can be used to reconstruct the full stack trace.
 //
+// The returned slice is a copy; mutating it does not affect the error.
+//
 // Returns:
 //   - frames ([]uintptr): slice of program counters representing the call stack,
 //     or nil if receiver or trace is nil
 func (e *root) StackFrames() (frames []uintptr) {
 	if e == nil || e.trace == nil {
-		return
+		return nil
 	}
 
-	frames = *e.trace
-
-	return
+	return slices.Clone(*e.trace)
 }
 
-// Is implements error equality checking. Two errors are considered equal if:
-//   - Both are nil, or
-//   - They are of the same type (*root), and:
-//   - Their types match (or target type is empty), and
-//   - Their messages match
-//   - Their messages match exactly (fallback)
+// Is reports whether target is another *root with the same message and a
+// matching type. The type matches when both types are equal or target's type
+// is empty. Errors of any other concrete type never match here; cross-type
+// matching is handled by the package-level Is via Unwrap traversal.
+//
+// The target's type is read through [root.Type] so the read stays synchronized
+// with concurrent [root.SetType] calls on the target.
 //
 // Parameters:
 //   - target (error): the error to compare against
@@ -107,19 +122,22 @@ func (e *root) StackFrames() (frames []uintptr) {
 // Returns:
 //   - matches (bool): true if errors are considered equal
 func (e *root) Is(target error) (matches bool) {
-	if target == nil {
-		matches = e == nil
-
-		return
+	if e == nil || target == nil {
+		return e == nil && target == nil
 	}
 
-	if err, ok := target.(*root); ok {
-		matches = (err.errType == "" || e.errType == err.errType) && e.message == err.message
-
-		return
+	t, ok := target.(*root)
+	if !ok || t == nil {
+		return false
 	}
 
-	return
+	e.mu.RLock()
+	errType := e.errType
+	e.mu.RUnlock()
+
+	targetType := t.Type()
+
+	return (targetType == "" || errType == targetType) && e.message == t.message
 }
 
 // As attempts to assign the error to the target interface.
@@ -139,27 +157,25 @@ func (e *root) Is(target error) (matches bool) {
 //   - ok (bool): true if assignment was successful
 func (e *root) As(target any) (ok bool) {
 	if target == nil {
-		return
+		return false
 	}
 
 	val := reflect.ValueOf(target)
 
-	if val.Kind() != reflect.Ptr || val.IsNil() {
-		return
+	if val.Kind() != reflect.Pointer || val.IsNil() {
+		return false
 	}
 
 	targetType := val.Type().Elem()
 	currentType := reflect.TypeOf(e)
 
-	if currentType.AssignableTo(targetType) {
-		val.Elem().Set(reflect.ValueOf(e))
-
-		ok = true
-
-		return
+	if !currentType.AssignableTo(targetType) {
+		return false
 	}
 
-	return
+	val.Elem().Set(reflect.ValueOf(e))
+
+	return true
 }
 
 // Unwrap returns the underlying error if this error wraps another.
@@ -185,7 +201,7 @@ func (e *root) Unwrap() (cause error) {
 //   - errType (Type): the Type to assign to this error
 //
 // Returns:
-//   - err (Error): the modified error (supports method chaining) or nil if receiver is ni
+//   - err (Error): the modified error (supports method chaining) or nil if receiver is nil
 func (e *root) SetType(errType Type) (err Error) {
 	if e == nil {
 		return
@@ -251,15 +267,19 @@ type wrapped struct {
 	frame   *frame
 }
 
-// Type returns the error's classification type if one was set.
-// It safely reads the errType field.
+// Type returns the error's classification type, or the empty Type if none was
+// set. The read is taken under the read lock, so it is safe to call concurrently
+// with [wrapped.SetType].
 //
 // Returns:
-//   - errType (Type): the error's type, or empty string if untyped or receiver is nil
+//   - errType (Type): the error's type, or empty string if untyped or the receiver is nil.
 func (e *wrapped) Type() (errType Type) {
 	if e == nil {
 		return
 	}
+
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 
 	errType = e.errType
 
@@ -267,37 +287,44 @@ func (e *wrapped) Type() (errType Type) {
 }
 
 // Error implements the error interface, returning the error message.
-// If the error wraps another error, it combines both messages.
+// If the error wraps another error, it combines both messages, joining them
+// with ": " only when the message itself is non-empty.
 //
 // Returns:
 //   - msg (string): the error message (or "<nil>" if receiver is nil)
 func (e *wrapped) Error() (msg string) {
-	msg = "<nil>"
-
 	if e == nil {
-		return
+		return "<nil>"
 	}
 
 	msg = e.message
 
 	if e.cause != nil {
-		msg += ": " + e.cause.Error()
+		if msg != "" {
+			msg += ": "
+		}
+
+		msg += e.cause.Error()
 	}
 
-	return
+	return msg
 }
 
-// Fields returns all structured fields attached to the error.
-// The returned map should not be modified directly.
+// Fields returns a snapshot copy of all structured fields attached to the error.
+// The copy is taken under the read lock, so it is safe to read concurrently with
+// SetField; mutating the returned map does not affect the error.
 //
 // Returns:
-//   - fields (map[string]any): all attached fields (may be nil) or nil if receiver is nil
+//   - fields (map[string]any): a copy of the attached fields (nil if none or if receiver is nil)
 func (e *wrapped) Fields() (fields map[string]any) {
 	if e == nil {
 		return
 	}
 
-	fields = e.fields
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	fields = maps.Clone(e.fields)
 
 	return
 }
@@ -308,9 +335,10 @@ func (e *wrapped) Fields() (fields map[string]any) {
 // For wrapped errors, this returns a single-frame stack containing the wrap point.
 //
 // Returns:
-//   - frames ([]uintptr): slice of program counters representing the call stack or nil if receiver is nil
+//   - frames ([]uintptr): slice of program counters representing the call stack,
+//     or nil if the receiver or its frame is nil
 func (e *wrapped) StackFrames() (frames []uintptr) {
-	if e == nil {
+	if e == nil || e.frame == nil {
 		return
 	}
 
@@ -319,12 +347,13 @@ func (e *wrapped) StackFrames() (frames []uintptr) {
 	return
 }
 
-// Is implements error equality checking. Two errors are considered equal if:
-//   - Both are nil, or
-//   - They are of the same type (*wrapped), and:
-//   - Their types match (or target type is empty), and
-//   - Their messages match
-//   - Their messages match exactly (fallback)
+// Is reports whether target is another *wrapped with the same message and a
+// matching type. The type matches when both types are equal or target's type
+// is empty. Errors of any other concrete type never match here; cross-type
+// matching is handled by the package-level Is via Unwrap traversal.
+//
+// The target's type is read through [wrapped.Type] so the read stays synchronized
+// with concurrent [wrapped.SetType] calls on the target.
 //
 // Parameters:
 //   - target (error): the error to compare against
@@ -332,19 +361,22 @@ func (e *wrapped) StackFrames() (frames []uintptr) {
 // Returns:
 //   - matches (bool): true if errors are considered equal
 func (e *wrapped) Is(target error) (matches bool) {
-	if target == nil {
-		matches = e == nil
-
-		return
+	if e == nil || target == nil {
+		return e == nil && target == nil
 	}
 
-	if err, ok := target.(*wrapped); ok {
-		matches = (err.errType == "" || e.errType == err.errType) && e.message == err.message
-
-		return
+	t, ok := target.(*wrapped)
+	if !ok || t == nil {
+		return false
 	}
 
-	return
+	e.mu.RLock()
+	errType := e.errType
+	e.mu.RUnlock()
+
+	targetType := t.Type()
+
+	return (targetType == "" || errType == targetType) && e.message == t.message
 }
 
 // As attempts to assign the error to the target interface.
@@ -364,27 +396,25 @@ func (e *wrapped) Is(target error) (matches bool) {
 //   - ok (bool): true if assignment was successful
 func (e *wrapped) As(target any) (ok bool) {
 	if target == nil {
-		return
+		return false
 	}
 
 	val := reflect.ValueOf(target)
 
-	if val.Kind() != reflect.Ptr || val.IsNil() {
-		return
+	if val.Kind() != reflect.Pointer || val.IsNil() {
+		return false
 	}
 
 	targetType := val.Type().Elem()
 	currentType := reflect.TypeOf(e)
 
-	if currentType.AssignableTo(targetType) {
-		val.Elem().Set(reflect.ValueOf(e))
-
-		ok = true
-
-		return
+	if !currentType.AssignableTo(targetType) {
+		return false
 	}
 
-	return
+	val.Elem().Set(reflect.ValueOf(e))
+
+	return true
 }
 
 // Unwrap returns the underlying error if this error wraps another.
@@ -461,13 +491,11 @@ func (e *wrapped) SetField(key string, value any) (err Error) {
 // It captures a stack trace at the join point and implements multi-error unwrapping.
 //
 // Fields:
-//   - isGlobal (bool): indicates if the join occurred during package initialization
-//   - errors ([]error): the list of joined errors
+//   - errs ([]error): the list of joined errors
 //   - trace (*stack): captured call stack at the join point
 type joined struct {
-	isGlobal bool
-	errors   []error
-	trace    *stack
+	errs  []error
+	trace *stack
 }
 
 // Error implements the error interface by joining all error messages with newlines.
@@ -476,35 +504,33 @@ type joined struct {
 // Returns:
 //   - msg (string): concatenated error messages separated by newlines or empty if receiver is nil or no errors
 func (e *joined) Error() (msg string) {
-	if e == nil || len(e.errors) == 0 {
-		return
+	if e == nil || len(e.errs) == 0 {
+		return ""
 	}
 
-	var messages []string
+	messages := make([]string, 0, len(e.errs))
 
-	for _, err := range e.errors {
+	for _, err := range e.errs {
 		if err != nil {
 			messages = append(messages, err.Error())
 		}
 	}
 
-	msg = strings.Join(messages, "\n")
-
-	return
+	return strings.Join(messages, "\n")
 }
 
 // StackFrames returns the raw program counters from the call stack at the join point.
+//
+// The returned slice is a copy; mutating it does not affect the error.
 //
 // Returns:
 //   - frames ([]uintptr): slice of program counters representing the call stack or nil if receiver or trace is nil
 func (e *joined) StackFrames() (frames []uintptr) {
 	if e == nil || e.trace == nil {
-		return
+		return nil
 	}
 
-	frames = *e.trace
-
-	return
+	return slices.Clone(*e.trace)
 }
 
 // Is checks if any of the joined errors match the target using the Is function.
@@ -516,20 +542,16 @@ func (e *joined) StackFrames() (frames []uintptr) {
 //   - matches (bool): true if any joined error matches the target
 func (e *joined) Is(target error) (matches bool) {
 	if target == nil {
-		matches = e == nil
-
-		return
+		return e == nil
 	}
 
-	for _, err := range e.errors {
+	for _, err := range e.errs {
 		if Is(err, target) {
-			matches = true
-
-			return
+			return true
 		}
 	}
 
-	return
+	return false
 }
 
 // As attempts to assign any of the joined errors to the target using the As function.
@@ -540,15 +562,13 @@ func (e *joined) Is(target error) (matches bool) {
 // Returns:
 //   - ok (bool): true if any joined error was successfully assigned
 func (e *joined) As(target any) (ok bool) {
-	for _, err := range e.errors {
+	for _, err := range e.errs {
 		if As(err, target) {
-			ok = true
-
-			return
+			return true
 		}
 	}
 
-	return
+	return false
 }
 
 // Unwrap returns the list of joined errors for multi-error unwrapping.
@@ -557,81 +577,102 @@ func (e *joined) As(target any) (ok bool) {
 //   - errs ([]error): the slice of joined errors or nil if receiver is nil
 func (e *joined) Unwrap() (errs []error) {
 	if e == nil {
-		return
+		return nil
 	}
 
-	errs = e.errors
-
-	return
+	return e.errs
 }
 
-// Error is the interface that groups all error capabilities in this package.
-// It extends the standard error interface with additional functionality:
-//   - Type classification
-//   - Structured fields
-//   - Stack traces
-//   - Standard error wrapping
+// Error is the common interface implemented by every error this package creates
+// (those returned by [New] and [Wrap]). It extends the standard error interface
+// with type classification, structured fields, and stack traces.
+//
+// Use [As] (or a type assertion) to obtain an Error from an opaque error value.
+// Implementations are safe for concurrent use.
 type Error interface {
 	error
+
+	// Type returns the error's classification type, or the empty Type if unset.
 	Type() (errType Type)
+
+	// Fields returns a snapshot copy of the error's structured fields.
 	Fields() (fields map[string]interface{})
+
+	// StackFrames returns the raw program counters of the captured call stack.
+	// The returned slice is a copy; mutating it does not affect the error.
 	StackFrames() (PCs []uintptr)
+
+	// Is reports whether target is considered equal to this error.
 	Is(target error) (result bool)
+
+	// As assigns this error to target if their types are compatible.
 	As(target interface{}) (result bool)
+
+	// SetType sets the classification type and returns the error for chaining.
 	SetType(errType Type) (err Error)
+
+	// SetField adds a key-value field and returns the error for chaining.
 	SetField(key string, value interface{}) (err Error)
 }
 
-// Type represents a classification type for errors.
-// Types allow errors to be categorized and handled based on their kind.
+// Type is a classification label for an error, letting callers categorize and
+// branch on errors by kind (for example "PaymentError" or "NotFound") rather
+// than by message. Set it with [WithType] or [Error.SetType] and read it with
+// [Error.Type]. The empty Type means unclassified.
 type Type string
 
-// OptionFunc represents a function that can configure an Error.
-// Used with New and Wrap to set error properties at creation time.
+// OptionFunc configures an [Error] at construction time. Pass option functions
+// such as [WithType] and [WithField] to [New] and [Wrap]. A nil OptionFunc is
+// ignored.
 type OptionFunc func(err Error)
 
+// Compile-time assertions that the concrete error types satisfy their intended
+// interfaces. root and wrapped implement the full Error interface; joined
+// implements only the standard error interface (it carries no type or fields).
 var (
 	_ Error = (*root)(nil)
 	_ Error = (*wrapped)(nil)
 	_ error = (*joined)(nil)
 )
 
-// New creates a new root error with stack trace information.
-// The skip parameter (3) ensures the trace starts at the caller's location.
+// New creates a new root error, capturing a stack trace starting at the caller.
 //
-// The creation process:
-//  1. Captures the call stack skipping internal frames.
-//  2. Checks if the error occurred during global initialization.
-//  3. Applies all provided option functions to configure the error.
+// The captured program counters are stored unresolved; symbolization into
+// file, line, and function happens lazily during formatting, so New stays cheap
+// even on hot paths (see BenchmarkNew). At most 64 stack frames are captured;
+// deeper stacks are truncated. Pass [WithType] and [WithField] options to
+// classify the error and attach structured context at creation time.
+//
+// The returned error always implements the [Error] interface; type-assert to it
+// (or use [As]) to reach [Error.Type], [Error.Fields], and [Error.StackFrames].
 //
 // Parameters:
-//   - msg (string): the primary error message
-//   - ofs (...OptionFunc): variadic list of OptionFunc functions to configure the error
+//   - msg (string): the primary, human-readable error message.
+//   - ofs (...OptionFunc): options applied to the new error, e.g. [WithType] and [WithField].
 //
 // Returns:
-//   - err (error): the newly created error (implements Error interface)
+//   - err (error): the newly created error; never nil.
 func New(msg string, ofs ...OptionFunc) (err error) {
-	trace := callers(3) // callers(3) skips this method (New), callers, and runtime.Callers
-
 	e := &root{
-		isGlobal: trace.isGlobal(),
-		message:  msg,
-		trace:    trace,
+		message: msg,
+		trace:   callers(3), // callers(3) skips this method (New), callers, and runtime.Callers
 	}
 
 	for _, f := range ofs {
-		f(e)
+		if f != nil {
+			f(e)
+		}
 	}
 
-	err = e
-
-	return
+	return e
 }
 
 // Wrap creates a new error that wraps an existing error with additional context.
-// The new error will have its own stack frame while preserving the original's trace.
+// The new error captures its own wrap-site frame; the wrapped error is referenced
+// as-is and is never mutated, so wrapping a shared error is safe for concurrent use.
 //
 // It delegates to the internal wrap function and applies options afterward.
+// Wrapping a nil cause returns nil and any options are ignored.
 //
 // Parameters:
 //   - cause (error): the error to wrap
@@ -639,83 +680,63 @@ func New(msg string, ofs ...OptionFunc) (err error) {
 //   - ofs (...OptionFunc): configuration options (same as New)
 //
 // Returns:
-//   - err (error): the new wrapping error
+//   - err (error): the new wrapping error, or nil if cause is nil
 func Wrap(cause error, msg string, ofs ...OptionFunc) (err error) {
 	w := wrap(cause, msg)
-
-	for _, f := range ofs {
-		f(w)
+	if w == nil {
+		return nil
 	}
 
-	err = w
+	for _, f := range ofs {
+		if f != nil {
+			f(w)
+		}
+	}
 
-	return
+	return w
 }
 
-// wrap is the internal implementation of error wrapping logic that handles three distinct cases:
+// wrap is the internal implementation of error wrapping. It never mutates the
+// error it wraps; the cause is referenced as-is and the new error owns only the
+// context captured at the wrap site. This keeps wrapping safe for concurrent use
+// and free of surprising side effects on the caller's error value.
 //
-// 1. Wrapping a root (preserves full stack trace while adding new context)
-// 2. Wrapping a wrapped (finds root error to preserve complete trace)
-// 3. Wrapping a non-package error (creates new root error with full stack)
+// Two cases are handled:
 //
-// The wrapping process:
-//  1. Captures the current stack trace and frame.
-//  2. Handles root by inserting the new trace or recreating if global.
-//  3. For wrapped, inserts into the underlying root's trace.
-//  4. For other errors, creates a new root.
+//  1. Wrapping a package error (*root or *wrapped): a *wrapped is returned that
+//     captures the single wrap-site frame and points at cause. The underlying
+//     root retains its original creation trace.
+//  2. Wrapping any other (external) error: a *root is returned that captures a
+//     full stack at the wrap site and points at cause.
 //
 // Parameters:
-//   - cause (error): The error being wrapped. Must be non-nil for the function to have effect.
-//     If nil is passed, the function returns nil.
+//   - cause (error): The error being wrapped. If nil, the function returns nil.
 //   - msg (string): Additional contextual information describing the wrapping site.
-//     This message will become part of the error chain and appear in the Error() output.
-//     Should be descriptive enough to identify where/why the wrap occurred.
+//     This message becomes part of the error chain and appears in Error() output.
 //
 // Returns:
 //   - err (Error): The newly created wrapping error that implements the Error interface.
 func wrap(cause error, msg string) (err Error) {
 	if cause == nil {
-		return
+		return nil
 	}
 
-	trace := callers(4) // callers(4) skips runtime.Callers, callers, this method (wrap), and Wrap
-	frame := caller(3)  // caller(3) skips caller, this method (wrap), and Wrap
-
-	switch e := cause.(type) {
-	case *root:
-		if e.isGlobal {
-			cause = &root{
-				isGlobal: e.isGlobal,
-				errType:  e.errType,
-				message:  e.message,
-				fields:   e.fields,
-				cause:    e.cause,
-				trace:    trace,
-			}
-		} else {
-			e.trace.insertPC(*trace)
-		}
-	case *wrapped:
-		if r, ok := Cause(cause).(*root); ok {
-			r.trace.insertPC(*trace)
+	switch cause.(type) {
+	case *root, *wrapped:
+		err = &wrapped{
+			message: msg,
+			cause:   cause,
+			frame:   caller(3), // caller(3) skips caller, this method (wrap), and Wrap
 		}
 	default:
 		err = &root{
 			message: msg,
-			cause:   e,
-			trace:   trace,
+			cause:   cause,
+			trace:   callers(4), // callers(4) skips runtime.Callers, callers, this method (wrap), and Wrap
 		}
-
-		return
 	}
 
-	err = &wrapped{
-		message: msg,
-		cause:   cause,
-		frame:   frame,
-	}
-
-	return
+	return err
 }
 
 // WithType creates an OptionFunc that sets an error's type.
@@ -754,14 +775,12 @@ func WithField(key string, value any) (f OptionFunc) {
 // Returns:
 //   - cause (error): The next error in the chain, or nil if none.
 func Unwrap(err error) (cause error) {
-	u, k := err.(interface{ Unwrap() error })
-	if !k {
-		return
+	u, ok := err.(interface{ Unwrap() error })
+	if !ok {
+		return nil
 	}
 
-	cause = u.Unwrap()
-
-	return
+	return u.Unwrap()
 }
 
 // Is reports whether err or any error in its chain matches target.
@@ -777,16 +796,10 @@ func Unwrap(err error) (cause error) {
 //   - matches (bool): true if any error in err's chain matches target.
 func Is(err, target error) (matches bool) {
 	if err == nil || target == nil {
-		matches = err == target
-
-		return
+		return err == target
 	}
 
-	isComparable := reflect.TypeOf(target).Comparable()
-
-	matches = is(err, target, isComparable)
-
-	return
+	return is(err, target, reflect.TypeOf(target).Comparable())
 }
 
 // is is the internal recursive helper for Is.
@@ -802,34 +815,28 @@ func Is(err, target error) (matches bool) {
 func is(err, target error, isComparable bool) (matches bool) {
 	for {
 		if isComparable && err == target {
-			matches = true
-
-			return
+			return true
 		}
 
-		if x, k := err.(interface{ Is(error) bool }); k && x.Is(target) {
-			matches = true
-
-			return
+		if x, ok := err.(interface{ Is(error) bool }); ok && x.Is(target) {
+			return true
 		}
 
 		switch x := err.(type) {
 		case interface{ Unwrap() error }:
 			if err = x.Unwrap(); err == nil {
-				return
+				return false
 			}
 		case interface{ Unwrap() []error }:
 			for _, err := range x.Unwrap() {
-				if is(err, target, isComparable) {
-					matches = true
-
-					return
+				if err != nil && is(err, target, isComparable) {
+					return true
 				}
 			}
 
-			return
+			return false
 		default:
-			return
+			return false
 		}
 	}
 }
@@ -847,25 +854,23 @@ func is(err, target error, isComparable bool) (matches bool) {
 //   - ok (bool): true if a matching error was found and target was set.
 func As(err error, target any) (ok bool) {
 	if target == nil || err == nil {
-		return
+		return false
 	}
 
 	val := reflect.ValueOf(target)
 	typ := val.Type()
 
-	if typ.Kind() != reflect.Ptr || val.IsNil() {
-		return
+	if typ.Kind() != reflect.Pointer || val.IsNil() {
+		return false
 	}
 
 	targetType := typ.Elem()
 
 	if targetType.Kind() != reflect.Interface && !targetType.Implements(reflect.TypeOf((*error)(nil)).Elem()) {
-		return
+		return false
 	}
 
-	ok = as(err, target, val, targetType)
-
-	return
+	return as(err, target, val, targetType)
 }
 
 // as is the internal recursive helper for As.
@@ -884,21 +889,17 @@ func as(err error, target any, targetVal reflect.Value, targetType reflect.Type)
 		if reflect.TypeOf(err).AssignableTo(targetType) {
 			targetVal.Elem().Set(reflect.ValueOf(err))
 
-			ok = true
-
-			return
+			return true
 		}
 
-		if x, k := err.(interface{ As(interface{}) bool }); k && x.As(target) {
-			ok = true
-
-			return
+		if x, ok := err.(interface{ As(interface{}) bool }); ok && x.As(target) {
+			return true
 		}
 
 		switch x := err.(type) {
 		case interface{ Unwrap() error }:
 			if err = x.Unwrap(); err == nil {
-				return
+				return false
 			}
 		case interface{ Unwrap() []error }:
 			for _, err := range x.Unwrap() {
@@ -907,15 +908,13 @@ func as(err error, target any, targetVal reflect.Value, targetType reflect.Type)
 				}
 
 				if as(err, target, targetVal, targetType) {
-					ok = true
-
-					return
+					return true
 				}
 			}
 
-			return
+			return false
 		default:
-			return
+			return false
 		}
 	}
 }
@@ -932,9 +931,7 @@ func Cause(err error) (cause error) {
 	for {
 		uerr := Unwrap(err)
 		if uerr == nil {
-			cause = err
-
-			return
+			return err
 		}
 
 		err = uerr
@@ -953,7 +950,7 @@ func Cause(err error) (cause error) {
 // Returns:
 //   - err (error): the joined error or single error if only one
 func Join(errs ...error) (err error) {
-	var nonNilErrs []error
+	nonNilErrs := make([]error, 0, len(errs))
 
 	for _, e := range errs {
 		if e != nil {
@@ -962,22 +959,15 @@ func Join(errs ...error) (err error) {
 	}
 
 	if len(nonNilErrs) == 0 {
-		return
+		return nil
 	}
 
 	if len(nonNilErrs) == 1 {
-		err = nonNilErrs[0]
-
-		return
+		return nonNilErrs[0]
 	}
 
-	trace := callers(3)
-
-	err = &joined{
-		isGlobal: trace.isGlobal(),
-		errors:   nonNilErrs,
-		trace:    trace,
+	return &joined{
+		errs:  nonNilErrs,
+		trace: callers(3),
 	}
-
-	return
 }

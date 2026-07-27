@@ -1,6 +1,6 @@
-module github.com/hueristiq/hq-go-errors
+module github.com/hueristiq/hq-lib-errors-go
 
-go 1.25.0
+go 1.26.3
 
 require github.com/stretchr/testify v1.11.1
 
