@@ -2,7 +2,7 @@
 
 ![made with go](https://img.shields.io/badge/made%20with-Go-1E90FF.svg) [![go reference](https://pkg.go.dev/badge/github.com/hueristiq/hq-lib-errors-go.svg)](https://pkg.go.dev/github.com/hueristiq/hq-lib-errors-go) [![license](https://img.shields.io/badge/license-MIT-gray.svg?color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/blob/master/LICENSE) ![maintenance](https://img.shields.io/badge/maintained%3F-yes-1E90FF.svg) [![open issues](https://img.shields.io/github/issues-raw/hueristiq/hq-lib-errors-go.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/issues?q=is:issue+is:open) [![closed issues](https://img.shields.io/github/issues-closed-raw/hueristiq/hq-lib-errors-go.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/issues?q=is:issue+is:closed) [![contribution](https://img.shields.io/badge/contributions-welcome-1E90FF.svg)](https://github.com/hueristiq/hq-lib-errors-go/blob/master/CONTRIBUTING.md)
 
-`hq-lib-errors-go` is a [Go (Golang)](http://golang.org/) package for rich, structured error handling: stack traces, error wrapping, type classification, structured fields, and multi-error aggregation.
+`hq-lib-errors-go` is a [Go (Golang)](http://golang.org/) package for rich, structured error handling.
 
 ## Resources
 
@@ -22,14 +22,14 @@
 
 ## Features
 
-- **Stack traces** — every error captures where it was created; raw program counters are stored at the call site and resolved to file/line/function lazily, only when an error is formatted with traces enabled, so error creation stays cheap.
-- **Error wrapping** — add context as an error propagates while preserving the original error and its trace. Wrapping never mutates the wrapped error.
-- **Type classification** — tag errors with a `Type` for programmatic handling.
-- **Structured fields** — attach arbitrary key-value metadata (request IDs, parameters, …) for richer debugging and structured logs.
-- **Multi-error aggregation** — `Join` combines several errors into one that unwraps to all of them and records where the join happened.
-- **Flexible formatting** — render an error chain as a human-readable string or a JSON-ready map, with options to include/exclude stack traces, invert order, or include external errors.
-- **Standards-compliant** — implements `error`, `Unwrap`, `Is`, and `As`, and interoperates with errors from any source.
-- **Concurrency-safe** — errors are safe to share, format, and inspect across goroutines.
+- **Stack traces**: every error captures where it was created; raw program counters are stored at the call site and resolved to file/line/function lazily, only when an error is formatted with traces enabled, so error creation stays cheap.
+- **Error wrapping**: add context as an error propagates while preserving the original error and its trace. Wrapping never mutates the wrapped error.
+- **Type classification**: tag errors with a `Type` for programmatic handling.
+- **Structured fields**: attach arbitrary key-value metadata (request IDs, parameters, …) for richer debugging and structured logs.
+- **Multi-error aggregation**: `Join` combines several errors into one that unwraps to all of them and records where the join happened.
+- **Flexible formatting**: render an error chain as a human-readable string or a JSON-ready map, with options to include/exclude stack traces, invert order, or include external errors.
+- **Standards-compliant**: implements `error`, `Unwrap`, `Is`, and `As`, and interoperates with errors from any source.
+- **Concurrency-safe**: errors are safe to share, format, and inspect across goroutines.
 
 ## Installation
 
@@ -136,13 +136,14 @@ Errors created by this package satisfy the `hqgoerrors.Error` interface. Recover
 
 ```go
 var e hqgoerrors.Error
+
 if hqgoerrors.As(err, &e) {
 	fmt.Println("Type:", e.Type())     // PaymentError
 	fmt.Println("Fields:", e.Fields()) // map[amount:49.95 order_id:1234]
 }
 ```
 
-`Fields()` returns a snapshot copy, so it is safe to read while the error is mutated concurrently, and mutating the returned map does not affect the error. The type and fields can also be set after creation with `e.SetType(...)` and `e.SetField(...)`, which return the error for chaining.
+`Fields()` returns a snapshot copy, so it is safe to read while the error is mutated concurrently, and mutating the returned map does not affect the error. The type and fields can also be set after creation through the `MutableError` interface — `SetType(...)` and `SetField(...)` return the error for chaining — though setting them at creation time with `WithType`/`WithField` is preferred.
 
 ### Unwrapping, `Is`, `As`, and `Cause`
 
@@ -162,10 +163,13 @@ These mirror the standard library and traverse the whole chain, including the br
 	}
 	```
 
+	Note that errors created by this package compare by value (message and type), not identity: two separately created errors with the same message match each other. Create sentinels once and reuse them when identity matters.
+
 - **`As`** finds the first error in the chain assignable to the target and assigns it:
 
 	```go
 	var e hqgoerrors.Error
+
 	if hqgoerrors.As(err, &e) {
 		fmt.Println("Type:", e.Type())
 	}
@@ -179,7 +183,7 @@ These mirror the standard library and traverse the whole chain, including the br
 
 ### Formatting Errors
 
-`ToString`, `ToJSON`, and `ToJSONString` render an error chain. Stack traces are **omitted by default**; enable them with the `FormatWithTrace` option. For finer control over ordering, indentation, and trace inclusion, build a `Formatter` with `NewFormatter`.
+`ToString`, `ToJSON`, and `ToJSONString` render an error chain. Stack traces are **omitted by default**; enable them with the `FormatterWithTrace` option. Package errors also implement `fmt.Formatter`, so `fmt.Printf("%+v", err)` prints the full chain with traces. For finer control over ordering, indentation, and trace inclusion, build a `Formatter` with `NewFormatter`.
 
 #### ... to String
 
@@ -198,7 +202,7 @@ func main() {
 	err = hqgoerrors.Wrap(err, "wrap error example 1!")
 	err = hqgoerrors.Wrap(err, "wrap error example 2!", hqgoerrors.WithType("ERROR_TYPE_2"), hqgoerrors.WithField("FIELD_KEY_1", "FIELD_VALUE_1"), hqgoerrors.WithField("FIELD_KEY_2", "FIELD_VALUE_2"))
 
-	formattedStr := hqgoerrors.ToString(err, hqgoerrors.FormatWithTrace())
+	formattedStr := hqgoerrors.ToString(err, hqgoerrors.FormatterWithTrace())
 
 	fmt.Println(formattedStr)
 }
@@ -250,7 +254,7 @@ func main() {
 	err = hqgoerrors.Wrap(err, "wrap error example 1!")
 	err = hqgoerrors.Wrap(err, "wrap error example 2!", hqgoerrors.WithType("ERROR_TYPE_2"), hqgoerrors.WithField("FIELD_KEY_1", "FIELD_VALUE_1"), hqgoerrors.WithField("FIELD_KEY_2", "FIELD_VALUE_2"))
 
-	formattedJSON := hqgoerrors.ToJSONString(err, hqgoerrors.FormatWithTrace())
+	formattedJSON := hqgoerrors.ToJSONString(err, hqgoerrors.FormatterWithTrace())
 
 	fmt.Println(formattedJSON)
 }

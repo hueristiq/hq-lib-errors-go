@@ -3,26 +3,30 @@ package errors
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 )
 
 // UnpackedError represents the decomposed structure of an error.
-// It breaks down complex errors into their constituent parts for easier formatting and analysis.
-// This struct is used internally by formatting functions to organize error information.
+// It breaks down complex errors into their constituent parts for easier
+// formatting and analysis. [Unpack] returns it; use it to build custom
+// renderers when [Formatter] is not flexible enough.
 //
 // Fields:
-//   - ErrExternal (error): the first external (non-package) error found in the chain;
-//     traversal stops there, even if that error itself wraps further errors
-//   - ErrRoot (ErrPart): the root error part, if present
-//   - ErrChain ([]ErrPart): the chain of wrapped error parts
-//   - ErrJoined ([]error): list of joined errors, if the error is a joined type
+//   - External (error): the first external (non-package) error found in the
+//     chain; traversal stops there, even if that error itself wraps further
+//     errors
+//   - Root (ErrPart): the root error part, if present
+//   - Chain ([]ErrPart): the chain of wrapped error parts
+//   - Joined ([]error): list of joined errors, if the error is a joined type
 type UnpackedError struct {
-	ErrExternal error
-	ErrRoot     ErrPart
-	ErrChain    []ErrPart
-	ErrJoined   []error
+	External error
+	Root     ErrPart
+	Chain    []ErrPart
+	Joined   []error
 }
 
 // ErrPart represents a single component of an error, either root or wrapped.
@@ -72,6 +76,23 @@ func (f *Formatter) String(err error) (formatted string) {
 // JSON formats the error as a map suitable for JSON encoding.
 // It handles both chain and joined errors differently.
 //
+// The schema for a chain error is:
+//
+//	{
+//	  "root":     {"message": ..., "type"?: ..., "fields"?: ..., "stack"?: ...},
+//	  "chain":    [{"message": ..., "type"?: ..., "fields"?: ..., "stack"?: ...}],
+//	  "external": {"message": ..., "go_type": ...}
+//	}
+//
+// "root" and "chain" are omitted when empty, and "external" when there is no
+// external error or it is excluded via [FormatterWithoutExternal]. "stack" appears only
+// with [FormatterWithTrace]. The schema for a joined error uses the "kind" key as its
+// discriminator — "type" is reserved for the error classification:
+//
+//	{
+//	  "kind": "joined", "count": n, "join_stack"?: [...], "errors": [...]
+//	}
+//
 // Parameters:
 //   - err (error): the error to format
 //
@@ -100,31 +121,31 @@ func (f *Formatter) JSON(err error) (formatted map[string]any) {
 func (f *Formatter) formatChainString(err error) string {
 	unpacked := unpack(err, f.options.WithTrace)
 
-	parts := make([]string, 0, len(unpacked.ErrChain)+2)
+	parts := make([]string, 0, len(unpacked.Chain)+2)
 
-	if f.options.IsInnerFirst {
-		if unpacked.ErrExternal != nil && (f.options.WithExternal || f.isOnlyExternal(&unpacked)) {
-			parts = append(parts, f.formatExternalString(unpacked.ErrExternal))
+	if f.options.InnerFirst {
+		if unpacked.External != nil && (f.options.WithExternal || f.isOnlyExternal(&unpacked)) {
+			parts = append(parts, f.formatExternalString(unpacked.External))
 		}
 
-		if f.hasRootContent(&unpacked.ErrRoot) {
-			parts = append(parts, f.formatPartString(&unpacked.ErrRoot, "root"))
+		if f.hasRootContent(&unpacked.Root) {
+			parts = append(parts, f.formatPartString(&unpacked.Root, "root"))
 		}
 
-		for i := len(unpacked.ErrChain) - 1; i >= 0; i-- {
-			parts = append(parts, f.formatPartString(&unpacked.ErrChain[i], "wrap"))
+		for i := len(unpacked.Chain) - 1; i >= 0; i-- {
+			parts = append(parts, f.formatPartString(&unpacked.Chain[i], "wrap"))
 		}
 	} else {
-		for i := range len(unpacked.ErrChain) {
-			parts = append(parts, f.formatPartString(&unpacked.ErrChain[i], "wrap"))
+		for i := range len(unpacked.Chain) {
+			parts = append(parts, f.formatPartString(&unpacked.Chain[i], "wrap"))
 		}
 
-		if f.hasRootContent(&unpacked.ErrRoot) {
-			parts = append(parts, f.formatPartString(&unpacked.ErrRoot, "root"))
+		if f.hasRootContent(&unpacked.Root) {
+			parts = append(parts, f.formatPartString(&unpacked.Root, "root"))
 		}
 
-		if unpacked.ErrExternal != nil && (f.options.WithExternal || f.isOnlyExternal(&unpacked)) {
-			parts = append(parts, f.formatExternalString(unpacked.ErrExternal))
+		if unpacked.External != nil && (f.options.WithExternal || f.isOnlyExternal(&unpacked)) {
+			parts = append(parts, f.formatExternalString(unpacked.External))
 		}
 	}
 
@@ -240,25 +261,25 @@ func (f *Formatter) formatChainJSON(err error) map[string]any {
 	unpacked := unpack(err, f.options.WithTrace)
 	result := make(map[string]any)
 
-	if unpacked.ErrExternal != nil && (f.options.WithExternal || f.isOnlyExternal(&unpacked)) {
+	if unpacked.External != nil && (f.options.WithExternal || f.isOnlyExternal(&unpacked)) {
 		result["external"] = map[string]any{
-			"message": unpacked.ErrExternal.Error(),
-			"go_type": fmt.Sprintf("%T", unpacked.ErrExternal),
+			"message": unpacked.External.Error(),
+			"go_type": fmt.Sprintf("%T", unpacked.External),
 		}
 	}
 
-	if f.hasRootContent(&unpacked.ErrRoot) {
-		result["root"] = f.formatPartJSON(&unpacked.ErrRoot)
+	if f.hasRootContent(&unpacked.Root) {
+		result["root"] = f.formatPartJSON(&unpacked.Root)
 	}
 
-	if len(unpacked.ErrChain) > 0 {
-		chain := make([]map[string]any, 0, len(unpacked.ErrChain))
+	if len(unpacked.Chain) > 0 {
+		chain := make([]map[string]any, 0, len(unpacked.Chain))
 
-		for _, part := range unpacked.ErrChain {
+		for _, part := range unpacked.Chain {
 			chain = append(chain, f.formatPartJSON(&part))
 		}
 
-		if f.options.IsInnerFirst {
+		if f.options.InnerFirst {
 			slices.Reverse(chain)
 		}
 
@@ -315,7 +336,9 @@ func (f *Formatter) formatPartJSON(part *ErrPart) map[string]any {
 }
 
 // formatJoinedJSON formats a joined error into a JSON-compatible map.
-// It includes type, count, optional join stack, and recursively formats sub-errors.
+// It includes the "joined" kind discriminator, count, optional join stack, and
+// recursively formats sub-errors. The discriminator key is "kind", not "type":
+// "type" is reserved for the error classification (see ErrPart).
 //
 // Parameters:
 //   - joinErr (*joined): the joined error to format
@@ -324,7 +347,7 @@ func (f *Formatter) formatPartJSON(part *ErrPart) map[string]any {
 //   - (map[string]any): the formatted map
 func (f *Formatter) formatJoinedJSON(joinErr *joined) map[string]any {
 	result := map[string]any{
-		"type":  "joined",
+		"kind":  "joined",
 		"count": len(joinErr.errs),
 	}
 
@@ -382,21 +405,21 @@ func (f *Formatter) hasRootContent(root *ErrPart) bool {
 // Returns:
 //   - (bool): true if only external error is present
 func (f *Formatter) isOnlyExternal(unpacked *UnpackedError) bool {
-	return unpacked.ErrExternal != nil && unpacked.ErrRoot.Message == "" && len(unpacked.ErrChain) == 0
+	return unpacked.External != nil && unpacked.Root.Message == "" && len(unpacked.Chain) == 0
 }
 
 // FormatterOptions holds configuration for the Formatter.
 // It controls aspects like order, trace inclusion, and formatting style.
 //
 // Fields:
-//   - IsInnerFirst (bool): if true, format from inner to outer (default: false)
+//   - InnerFirst (bool): if true, format from inner to outer (default: false)
 //   - WithTrace (bool): include stack traces (default: false)
 //   - InvertTrace (bool): invert stack trace order (default: false)
 //   - WithExternal (bool): include external errors (default: true)
 //   - Spacing (string): spacing between elements (default: " ")
 //   - Indentation (string): indentation for nested elements (default: "  ")
 type FormatterOptions struct {
-	IsInnerFirst bool
+	InnerFirst   bool
 	WithTrace    bool
 	InvertTrace  bool
 	WithExternal bool
@@ -419,7 +442,7 @@ type FormatterOptionFunc func(options *FormatterOptions)
 //   - formatter (*Formatter): the new formatter instance
 func NewFormatter(ofs ...FormatterOptionFunc) (formatter *Formatter) {
 	options := &FormatterOptions{
-		IsInnerFirst: false,
+		InnerFirst:   false,
 		WithTrace:    false,
 		InvertTrace:  false,
 		WithExternal: true,
@@ -438,60 +461,66 @@ func NewFormatter(ofs ...FormatterOptionFunc) (formatter *Formatter) {
 	}
 }
 
-// FormatWithTrace returns an option function to enable stack traces.
+// FormatterWithTrace returns an option function to enable stack traces.
 //
 // Returns:
 //   - f (FormatterOptionFunc): configuration function for NewFormatter
-func FormatWithTrace() (f FormatterOptionFunc) {
+func FormatterWithTrace() (f FormatterOptionFunc) {
 	return func(options *FormatterOptions) {
 		options.WithTrace = true
 	}
 }
 
-// FormatWithInnerFirst returns an option function that formats the error chain
-// from the innermost cause outward (the default is outermost first).
+// FormatterWithInnerFirst returns an option function that formats the error
+// chain from the innermost cause outward (the default is outermost first).
 //
 // Returns:
 //   - f (FormatterOptionFunc): configuration function for NewFormatter
-func FormatWithInnerFirst() (f FormatterOptionFunc) {
+func FormatterWithInnerFirst() (f FormatterOptionFunc) {
 	return func(options *FormatterOptions) {
-		options.IsInnerFirst = true
+		options.InnerFirst = true
 	}
 }
 
-// FormatWithInvertedTrace returns an option function that renders stack traces
-// with the most recent call last (the default is most recent call first).
+// FormatterWithInvertedTrace returns an option function that renders stack
+// traces with the most recent call last (the default is most recent call
+// first).
 //
 // Returns:
 //   - f (FormatterOptionFunc): configuration function for NewFormatter
-func FormatWithInvertedTrace() (f FormatterOptionFunc) {
+func FormatterWithInvertedTrace() (f FormatterOptionFunc) {
 	return func(options *FormatterOptions) {
 		options.InvertTrace = true
 	}
 }
 
-// FormatWithoutExternal returns an option function that omits external
+// FormatterWithoutExternal returns an option function that omits external
 // (non-package) errors from the output, unless the error consists solely of an
 // external error.
 //
 // Returns:
 //   - f (FormatterOptionFunc): configuration function for NewFormatter
-func FormatWithoutExternal() (f FormatterOptionFunc) {
+func FormatterWithoutExternal() (f FormatterOptionFunc) {
 	return func(options *FormatterOptions) {
 		options.WithExternal = false
 	}
 }
 
-// Unpack decomposes an error into its parts, resolving stack traces.
-// It handles joined, root, wrapped, and external errors.
+// Unpack decomposes an error into its constituent parts for custom rendering
+// and analysis. It exposes the machinery [Formatter] is built on; reach for it
+// when the built-in string and JSON formats are not flexible enough.
 //
 // The unpacking process:
-//  1. If joined, sets ErrJoined and returns.
+//  1. If joined, sets Joined and returns.
 //  2. Traverses the chain using Unwrap.
-//  3. For root/wrapped, extracts to ErrRoot/ErrChain.
-//  4. For external, sets ErrExternal and stops — even if that error wraps
+//  3. For root/wrapped, extracts to Root/Chain.
+//  4. For external, sets External and stops — even if that error wraps
 //     further errors (for example a fmt.Errorf %w chain), which are not
 //     decomposed.
+//
+// Unlike a Formatter with traces disabled, Unpack always symbolizes stack PCs
+// into frames, which is the expensive part of decomposition. Prefer
+// [ToString]/[ToJSON] without [FormatterWithTrace] when traces are not needed.
 //
 // Parameters:
 //   - err (error): the error to unpack
@@ -515,7 +544,7 @@ func Unpack(err error) (uerr UnpackedError) {
 //   - uerr (UnpackedError): the unpacked structure
 func unpack(err error, resolveStacks bool) (uerr UnpackedError) {
 	if joinErr, ok := err.(*joined); ok {
-		uerr.ErrJoined = joinErr.errs
+		uerr.Joined = joinErr.errs
 
 		return uerr
 	}
@@ -523,14 +552,14 @@ func unpack(err error, resolveStacks bool) (uerr UnpackedError) {
 	for err != nil {
 		switch e := err.(type) {
 		case *root:
-			uerr.ErrRoot = ErrPart{
+			uerr.Root = ErrPart{
 				Type:    e.Type(),
 				Message: e.message,
 				Fields:  e.Fields(),
 			}
 
 			if resolveStacks && e.trace != nil {
-				uerr.ErrRoot.Stack = e.trace.resolveToStackFrames()
+				uerr.Root.Stack = e.trace.resolveToStackFrames()
 			}
 		case *wrapped:
 			part := ErrPart{
@@ -543,9 +572,9 @@ func unpack(err error, resolveStacks bool) (uerr UnpackedError) {
 				part.Stack = Stack{e.frame.resolveToStackFrame()}
 			}
 
-			uerr.ErrChain = append(uerr.ErrChain, part)
+			uerr.Chain = append(uerr.Chain, part)
 		default:
-			uerr.ErrExternal = err
+			uerr.External = err
 
 			return uerr
 		}
@@ -574,7 +603,8 @@ func ToString(err error, ofs ...FormatterOptionFunc) (formatted string) {
 }
 
 // ToJSON is a convenience function to format an error as a JSON map.
-// It creates a formatter with options and calls JSON.
+// It creates a formatter with options and calls [Formatter.JSON]; see that
+// method's documentation for the resulting schema.
 //
 // Parameters:
 //   - err (error): the error to format
@@ -615,4 +645,70 @@ func ToJSONString(err error, ofs ...FormatterOptionFunc) (formatted string) {
 	formatted = string(bytes)
 
 	return
+}
+
+// formatError writes err to s following the fmt.Formatter conventions shared
+// by this package's error types: %v and %s write the error message, %q writes
+// the quoted message, and %+v writes the full formatted chain with stack
+// traces, equivalent to ToString(err, FormatterWithTrace()).
+//
+// Parameters:
+//   - s (fmt.State): the state to write to
+//   - verb (rune): the active format verb
+//   - err (error): the error being formatted
+func formatError(s fmt.State, verb rune, err error) {
+	switch verb {
+	case 'v':
+		if s.Flag('+') {
+			io.WriteString(s, ToString(err, FormatterWithTrace()))
+
+			return
+		}
+
+		io.WriteString(s, err.Error())
+	case 'q':
+		io.WriteString(s, strconv.Quote(err.Error()))
+	default:
+		io.WriteString(s, err.Error())
+	}
+}
+
+// Format implements [fmt.Formatter]: %v and %s print the error message, %q
+// prints it quoted, and %+v prints the full chain with stack traces (see
+// [ToString] with [FormatterWithTrace]).
+func (e *root) Format(s fmt.State, verb rune) {
+	if e == nil {
+		io.WriteString(s, "<nil>")
+
+		return
+	}
+
+	formatError(s, verb, e)
+}
+
+// Format implements [fmt.Formatter]: %v and %s print the error message, %q
+// prints it quoted, and %+v prints the full chain with stack traces (see
+// [ToString] with [FormatterWithTrace]).
+func (e *wrapped) Format(s fmt.State, verb rune) {
+	if e == nil {
+		io.WriteString(s, "<nil>")
+
+		return
+	}
+
+	formatError(s, verb, e)
+}
+
+// Format implements [fmt.Formatter]: %v and %s print the error messages joined
+// by newlines, %q prints them quoted, and %+v prints the full multi-error
+// rendering with the join location and stack traces (see [ToString] with
+// [FormatterWithTrace]).
+func (e *joined) Format(s fmt.State, verb rune) {
+	if e == nil {
+		io.WriteString(s, "<nil>")
+
+		return
+	}
+
+	formatError(s, verb, e)
 }
