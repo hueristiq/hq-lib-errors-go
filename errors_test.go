@@ -1,8 +1,10 @@
 package errors
 
 import (
-	"errors"
+	stderrors "errors"
 	"fmt"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 
@@ -111,7 +113,7 @@ func TestRootError(t *testing.T) {
 		assert.Equal(t, "<nil>", nilErr.Error())
 		assert.Nil(t, nilErr.Fields())
 		assert.Empty(t, nilErr.StackFrames())
-		assert.False(t, nilErr.Is(errors.New("test")))
+		assert.False(t, nilErr.Is(stderrors.New("test")))
 	})
 }
 
@@ -131,7 +133,7 @@ func TestWrapError(t *testing.T) {
 	t.Run("wrapping non-package error", func(t *testing.T) {
 		t.Parallel()
 
-		stdErr := errors.New("standard error")
+		stdErr := stderrors.New("standard error")
 		wrappedErr := Wrap(stdErr, "wrapper")
 
 		require.Error(t, wrappedErr)
@@ -230,8 +232,8 @@ func TestConcurrentFieldAccess(t *testing.T) {
 
 	for i := range 50 {
 		wg.Go(func() {
-			err.(*root).SetField(fmt.Sprintf("key-%d", i), i)
-			err.(*root).SetType(Type(fmt.Sprintf("TYPE_%d", i)))
+			_ = err.(*root).SetField(fmt.Sprintf("key-%d", i), i)
+			_ = err.(*root).SetType(Type(fmt.Sprintf("TYPE_%d", i)))
 		})
 
 		wg.Go(func() {
@@ -374,7 +376,7 @@ func TestIs(t *testing.T) {
 	err1a := Wrap(err1, "wrap 2")
 	err1b := Wrap(err1a, "wrap 3")
 
-	err2 := errors.New("2")
+	err2 := stderrors.New("2")
 	err2a := fmt.Errorf("wrap 2: %w", err1)
 
 	joinedErr := Join(err1, err2)
@@ -600,6 +602,26 @@ func TestCause(t *testing.T) {
 
 		assert.Equal(t, base, Cause(top))
 	})
+
+	t.Run("cyclic unwrap chain terminates", func(t *testing.T) {
+		t.Parallel()
+
+		a := &cyclicError{}
+		b := &cyclicError{}
+		a.next = b
+		b.next = a
+
+		assert.Same(t, a, Cause(a), "a cycle back to a visited error must terminate")
+	})
+
+	t.Run("self-referential unwrap terminates", func(t *testing.T) {
+		t.Parallel()
+
+		a := &cyclicError{}
+		a.next = a
+
+		assert.Same(t, a, Cause(a))
+	})
 }
 
 func TestWrappedMethods(t *testing.T) {
@@ -778,6 +800,33 @@ func TestWrappedStackFramesNilFrame(t *testing.T) {
 	assert.Empty(t, (&wrapped{}).StackFrames(), "nil frame yields no frames")
 }
 
+func TestWrappedStackFramesSymbolizeLikeStack(t *testing.T) {
+	t.Parallel()
+
+	err := Wrap(New("base"), "ctx").(*wrapped)
+
+	pcs := err.StackFrames()
+	require.Len(t, pcs, 1)
+
+	// The raw PC must feed runtime.CallersFrames unchanged and resolve to the
+	// same wrap-site frame that Stack reports.
+	runtimeFrame, _ := runtime.CallersFrames(pcs).Next()
+
+	expectedName := runtimeFrame.Function
+
+	if idx := strings.LastIndex(expectedName, "/"); idx >= 0 {
+		expectedName = expectedName[idx+1:]
+	}
+
+	frames := err.Stack()
+	require.Len(t, frames, 1)
+
+	assert.Equal(t, expectedName, frames[0].Name)
+	assert.Equal(t, runtimeFrame.File, frames[0].File)
+	assert.Equal(t, runtimeFrame.Line, frames[0].Line)
+	assert.Contains(t, frames[0].Name, "TestWrappedStackFramesSymbolizeLikeStack")
+}
+
 func TestFieldsReturnsCopy(t *testing.T) {
 	t.Parallel()
 
@@ -946,7 +995,7 @@ func TestAsResolverBranches(t *testing.T) {
 		t.Parallel()
 
 		want := New("x", WithType("WANT")).(*root)
-		me := &multiError{errs: []error{nil, errors.New("other"), want}}
+		me := &multiError{errs: []error{nil, stderrors.New("other"), want}}
 
 		var target *root
 
@@ -957,7 +1006,7 @@ func TestAsResolverBranches(t *testing.T) {
 	t.Run("foreign multi-error no match", func(t *testing.T) {
 		t.Parallel()
 
-		me := &multiError{errs: []error{errors.New("a"), errors.New("b")}}
+		me := &multiError{errs: []error{stderrors.New("a"), stderrors.New("b")}}
 
 		var target *root
 
@@ -980,11 +1029,11 @@ func TestIsResolverBranches(t *testing.T) {
 	t.Run("foreign multi-error", func(t *testing.T) {
 		t.Parallel()
 
-		sentinel := errors.New("sentinel")
-		me := &multiError{errs: []error{errors.New("other"), sentinel}}
+		sentinel := stderrors.New("sentinel")
+		me := &multiError{errs: []error{stderrors.New("other"), sentinel}}
 
 		assert.True(t, Is(me, sentinel))
-		assert.False(t, Is(me, errors.New("missing")))
+		assert.False(t, Is(me, stderrors.New("missing")))
 	})
 }
 
@@ -1039,6 +1088,20 @@ func (e *multiError) Unwrap() []error {
 	return e.errs
 }
 
+// cyclicError builds single-error Unwrap chains that loop, for exercising the
+// cycle guard in Cause.
+type cyclicError struct {
+	next *cyclicError
+}
+
+func (e *cyclicError) Error() string {
+	return "cyclic"
+}
+
+func (e *cyclicError) Unwrap() error {
+	return e.next
+}
+
 func TestWrapNilCauseWithOptions(t *testing.T) {
 	t.Parallel()
 
@@ -1058,7 +1121,7 @@ func TestIsConcurrentWithTargetSetType(t *testing.T) {
 
 		for range 50 {
 			wg.Go(func() {
-				target.(MutableError).SetType("B")
+				_ = target.(MutableError).SetType("B")
 			})
 
 			wg.Go(func() {
@@ -1079,7 +1142,7 @@ func TestIsConcurrentWithTargetSetType(t *testing.T) {
 
 		for range 50 {
 			wg.Go(func() {
-				target.(MutableError).SetType("B")
+				_ = target.(MutableError).SetType("B")
 			})
 
 			wg.Go(func() {
@@ -1111,7 +1174,7 @@ func TestErrorEmptyMessageWithCause(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, "inner", Wrap(New("inner"), "").Error(), "no leading colon for empty message")
-	assert.Equal(t, "ext", Wrap(errors.New("ext"), "").Error(), "no leading colon for empty message wrapping an external error")
+	assert.Equal(t, "ext", Wrap(stderrors.New("ext"), "").Error(), "no leading colon for empty message wrapping an external error")
 	assert.Equal(t, "outer: inner", Wrap(New("inner"), "outer").Error())
 }
 
@@ -1256,8 +1319,8 @@ func TestAsMutableError(t *testing.T) {
 
 	require.True(t, As(err, &me))
 
-	me.SetType("LATE")
-	me.SetField("late", true)
+	_ = me.SetType("LATE")
+	_ = me.SetField("late", true)
 
 	assert.Equal(t, Type("LATE"), me.Type())
 	assert.Equal(t, map[string]any{"late": true}, me.Fields())
@@ -1320,8 +1383,8 @@ func TestSettersOverwrite(t *testing.T) {
 
 	err := New("x", WithType("A"), WithField("k", 1)).(*root)
 
-	err.SetType("B")
-	err.SetField("k", 2)
+	_ = err.SetType("B")
+	_ = err.SetField("k", 2)
 
 	assert.Equal(t, Type("B"), err.Type())
 	assert.Equal(t, 2, err.Fields()["k"])

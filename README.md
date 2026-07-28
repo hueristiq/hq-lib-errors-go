@@ -1,6 +1,6 @@
 # hq-lib-errors-go
 
-![made with go](https://img.shields.io/badge/made%20with-Go-1E90FF.svg) [![go reference](https://pkg.go.dev/badge/github.com/hueristiq/hq-lib-errors-go.svg)](https://pkg.go.dev/github.com/hueristiq/hq-lib-errors-go) [![license](https://img.shields.io/badge/license-MIT-gray.svg?color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/blob/master/LICENSE) ![maintenance](https://img.shields.io/badge/maintained%3F-yes-1E90FF.svg) [![open issues](https://img.shields.io/github/issues-raw/hueristiq/hq-lib-errors-go.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/issues?q=is:issue+is:open) [![closed issues](https://img.shields.io/github/issues-closed-raw/hueristiq/hq-lib-errors-go.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/issues?q=is:issue+is:closed) [![contribution](https://img.shields.io/badge/contributions-welcome-1E90FF.svg)](https://github.com/hueristiq/hq-lib-errors-go/blob/master/CONTRIBUTING.md)
+![made with go](https://img.shields.io/badge/made%20with-Go-1E90FF.svg) [![go reference](https://pkg.go.dev/badge/github.com/hueristiq/hq-lib-errors-go.svg)](https://pkg.go.dev/github.com/hueristiq/hq-lib-errors-go) [![license](https://img.shields.io/badge/license-MIT-gray.svg?color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/blob/main/LICENSE) ![maintenance](https://img.shields.io/badge/maintained%3F-yes-1E90FF.svg) [![open issues](https://img.shields.io/github/issues-raw/hueristiq/hq-lib-errors-go.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/issues?q=is:issue+is:open) [![closed issues](https://img.shields.io/github/issues-closed-raw/hueristiq/hq-lib-errors-go.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/issues?q=is:issue+is:closed) [![contribution](https://img.shields.io/badge/contributions-welcome-1E90FF.svg)](https://github.com/hueristiq/hq-lib-errors-go/blob/main/CONTRIBUTING.md)
 
 `hq-lib-errors-go` is a [Go (Golang)](http://golang.org/) package for rich, structured error handling.
 
@@ -41,7 +41,7 @@ go get -v -u github.com/hueristiq/hq-lib-errors-go
 
 ## Usage
 
-The examples below import the package under the `hqgoerrors` alias. Runnable programs live in the [`examples/`](examples) directory.
+The examples below import the package under the `hqgoerrors` alias.
 
 ```go
 import hqgoerrors "github.com/hueristiq/hq-lib-errors-go"
@@ -311,7 +311,7 @@ output:
 
 ## Contributing
 
-Contributions are welcome and encouraged! Feel free to submit [Pull Requests](https://github.com/hueristiq/hq-lib-errors-go/pulls) or report [Issues](https://github.com/hueristiq/hq-lib-errors-go/issues). For more details, check out the [contribution guidelines](https://github.com/hueristiq/hq-lib-errors-go/blob/master/CONTRIBUTING.md).
+Contributions are welcome and encouraged! Feel free to submit [Pull Requests](https://github.com/hueristiq/hq-lib-errors-go/pulls) or report [Issues](https://github.com/hueristiq/hq-lib-errors-go/issues). For more details, check out the [contribution guidelines](https://github.com/hueristiq/hq-lib-errors-go/blob/main/CONTRIBUTING.md).
 
 A big thank you to all the [contributors](https://github.com/hueristiq/hq-lib-errors-go/graphs/contributors) for your ongoing support!
 
@@ -319,4 +319,4 @@ A big thank you to all the [contributors](https://github.com/hueristiq/hq-lib-er
 
 ## Licensing
 
-This package is licensed under the [MIT license](https://opensource.org/license/mit). You are free to use, modify, and distribute it, as long as you follow the terms of the license. You can find the full license text in the repository - [Full MIT license text](https://github.com/hueristiq/hq-lib-errors-go/blob/master/LICENSE).
+This package is licensed under the [MIT license](https://opensource.org/license/mit). You are free to use, modify, and distribute it, as long as you follow the terms of the license. You can find the full license text in the repository - [Full MIT license text](https://github.com/hueristiq/hq-lib-errors-go/blob/main/LICENSE).

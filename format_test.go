@@ -503,6 +503,46 @@ func TestFormatterNil(t *testing.T) {
 	assert.Nil(t, f.JSON(nil))
 }
 
+func TestZeroValueFormatter(t *testing.T) {
+	t.Parallel()
+
+	f := &Formatter{}
+
+	t.Run("string matches defaults", func(t *testing.T) {
+		t.Parallel()
+
+		err := Wrap(New("base", WithType("T"), WithField("k", "v")), "wrap")
+
+		assert.Equal(t, "wrap\n\n[T] base\n\nFields:\n  k: v", f.String(err))
+		assert.Equal(t, "ext", f.String(stderrors.New("ext")))
+		assert.Empty(t, f.String(nil))
+	})
+
+	t.Run("json matches defaults", func(t *testing.T) {
+		t.Parallel()
+
+		m := f.JSON(Wrap(New("root"), "wrap"))
+
+		chain, ok := m["chain"].([]map[string]any)
+		require.True(t, ok)
+		require.Len(t, chain, 1)
+		assert.Equal(t, "wrap", chain[0]["message"])
+
+		root, ok := m["root"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "root", root["message"])
+		assert.NotContains(t, root, "stack", "no stack without trace")
+
+		assert.Nil(t, f.JSON(nil))
+	})
+
+	t.Run("joined", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, "Multiple errors (2):\n\n1. a\n\n2. b", f.String(Join(New("a"), New("b"))))
+	})
+}
+
 func TestHasRootContent(t *testing.T) {
 	t.Parallel()
 

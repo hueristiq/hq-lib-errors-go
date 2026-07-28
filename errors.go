@@ -92,13 +92,14 @@ func (e *root) Fields() (fields map[string]any) {
 	return
 }
 
-// StackFrames returns the raw PCs (program counters) from the call stack.
-// These can be used to reconstruct the full stack trace.
+// StackFrames returns the raw PCs (program counters) of the call stack,
+// exactly as recorded by runtime.Callers. Feed them to runtime.CallersFrames
+// unchanged to symbolize the full stack trace.
 //
 // The returned slice is a copy; mutating it does not affect the error.
 //
 // Returns:
-//   - frames ([]uintptr): slice of program counters representing the call stack,
+//   - frames ([]uintptr): slice of raw program counters representing the call stack,
 //     or nil if receiver or trace is nil
 func (e *root) StackFrames() (frames []uintptr) {
 	if e == nil || e.trace == nil {
@@ -346,20 +347,22 @@ func (e *wrapped) Fields() (fields map[string]any) {
 	return
 }
 
-// StackFrames returns the raw program counters from the call stack.
-// These can be used to reconstruct the full stack trace.
+// StackFrames returns the raw program counters of the captured call stack,
+// exactly as recorded by runtime.Callers and ready for runtime.CallersFrames.
 //
 // For wrapped errors, this returns a single-frame stack containing the wrap point.
 //
+// The returned slice is a copy; mutating it does not affect the error.
+//
 // Returns:
-//   - frames ([]uintptr): slice of program counters representing the call stack,
+//   - frames ([]uintptr): slice of raw program counters representing the call stack,
 //     or nil if the receiver or its frame is nil
 func (e *wrapped) StackFrames() (frames []uintptr) {
 	if e == nil || e.frame == nil {
 		return
 	}
 
-	frames = []uintptr{e.frame.pc()}
+	frames = []uintptr{uintptr(*e.frame)}
 
 	return
 }
@@ -553,12 +556,13 @@ func (e *joined) Error() (msg string) {
 	return strings.Join(messages, "\n")
 }
 
-// StackFrames returns the raw program counters from the call stack at the join point.
+// StackFrames returns the raw program counters of the call stack at the join
+// point, exactly as recorded by runtime.Callers and ready for runtime.CallersFrames.
 //
 // The returned slice is a copy; mutating it does not affect the error.
 //
 // Returns:
-//   - frames ([]uintptr): slice of program counters representing the call stack or nil if receiver or trace is nil
+//   - frames ([]uintptr): slice of raw program counters representing the call stack or nil if receiver or trace is nil
 func (e *joined) StackFrames() (frames []uintptr) {
 	if e == nil || e.trace == nil {
 		return nil
@@ -637,8 +641,10 @@ type Error interface {
 	// call first. Resolution from raw PCs happens at call time.
 	Stack() (frames Stack)
 
-	// StackFrames returns the raw program counters of the captured call stack.
-	// The returned slice is a copy; mutating it does not affect the error.
+	// StackFrames returns the raw program counters of the captured call stack,
+	// exactly as recorded by runtime.Callers; pass them to
+	// runtime.CallersFrames unchanged to symbolize them. The returned slice is
+	// a copy; mutating it does not affect the error.
 	StackFrames() (PCs []uintptr)
 }
 
@@ -686,7 +692,7 @@ var (
 //
 // The captured program counters are stored unresolved; symbolization into
 // file, line, and function happens lazily during formatting, so New stays cheap
-// even on hot paths (see BenchmarkNew). At most 64 stack frames are captured;
+// even on hot paths. At most 64 stack frames are captured;
 // deeper stacks are truncated. Pass [WithType] and [WithField] options to
 // classify the error and attach structured context at creation time.
 //
@@ -774,7 +780,7 @@ func wrap(cause error, msg string) (err MutableError) {
 		err = &wrapped{
 			message: msg,
 			cause:   cause,
-			frame:   caller(3), // caller(3) skips caller, this method (wrap), and Wrap
+			frame:   caller(4), // caller(4) skips runtime.Callers, caller, this method (wrap), and Wrap
 		}
 	default:
 		err = &root{
@@ -796,7 +802,7 @@ func wrap(cause error, msg string) (err MutableError) {
 //   - f (OptionFunc): configuration function for New/Wrap
 func WithType(errType Type) (f OptionFunc) {
 	return func(err MutableError) {
-		err.SetType(errType)
+		_ = err.SetType(errType)
 	}
 }
 
@@ -810,7 +816,7 @@ func WithType(errType Type) (f OptionFunc) {
 //   - f (OptionFunc): configuration function for New/Wrap
 func WithField(key string, value any) (f OptionFunc) {
 	return func(err MutableError) {
-		err.SetField(key, value)
+		_ = err.SetField(key, value)
 	}
 }
 
@@ -986,13 +992,28 @@ func as(err error, target any, targetVal reflect.Value, targetType reflect.Type)
 // branches of a joined error (one created by [Join], or any error with an
 // Unwrap() []error method) and instead returns the joined error itself.
 //
+// The traversal is guarded against cycles: if an Unwrap chain loops back to an
+// error that was already visited, Cause returns that error instead of looping
+// forever. Errors whose dynamic type is not comparable cannot be tracked and
+// are not guarded.
+//
 // Parameters:
 //   - err (error): the error to inspect.
 //
 // Returns:
 //   - cause (error): The deepest non-wrapped error in the chain.
 func Cause(err error) (cause error) {
-	for {
+	seen := make(map[error]struct{})
+
+	for err != nil {
+		if reflect.TypeOf(err).Comparable() {
+			if _, ok := seen[err]; ok {
+				return err
+			}
+
+			seen[err] = struct{}{}
+		}
+
 		uerr := Unwrap(err)
 		if uerr == nil {
 			return err
@@ -1000,6 +1021,8 @@ func Cause(err error) (cause error) {
 
 		err = uerr
 	}
+
+	return nil
 }
 
 // Join combines multiple errors into a single joined error.

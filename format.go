@@ -47,6 +47,9 @@ type ErrPart struct {
 // Formatter is responsible for converting errors into human-readable string or JSON formats.
 // It uses configurable options to control the output structure and content.
 //
+// The zero value is usable: a Formatter with nil options behaves like one
+// built by NewFormatter without options.
+//
 // Fields:
 //   - options (*FormatterOptions): the configuration options for formatting
 type Formatter struct {
@@ -119,12 +122,14 @@ func (f *Formatter) JSON(err error) (formatted map[string]any) {
 // Returns:
 //   - (string): the formatted string
 func (f *Formatter) formatChainString(err error) string {
-	unpacked := unpack(err, f.options.WithTrace)
+	options := f.optionsOrDefault()
+
+	unpacked := unpack(err, options.WithTrace)
 
 	parts := make([]string, 0, len(unpacked.Chain)+2)
 
-	if f.options.InnerFirst {
-		if unpacked.External != nil && (f.options.WithExternal || f.isOnlyExternal(&unpacked)) {
+	if options.InnerFirst {
+		if unpacked.External != nil && (options.WithExternal || f.isOnlyExternal(&unpacked)) {
 			parts = append(parts, f.formatExternalString(unpacked.External))
 		}
 
@@ -144,7 +149,7 @@ func (f *Formatter) formatChainString(err error) string {
 			parts = append(parts, f.formatPartString(&unpacked.Root, "root"))
 		}
 
-		if unpacked.External != nil && (f.options.WithExternal || f.isOnlyExternal(&unpacked)) {
+		if unpacked.External != nil && (options.WithExternal || f.isOnlyExternal(&unpacked)) {
 			parts = append(parts, f.formatExternalString(unpacked.External))
 		}
 	}
@@ -165,13 +170,15 @@ func (f *Formatter) formatChainString(err error) string {
 // Returns:
 //   - (string): the formatted string for this part
 func (f *Formatter) formatPartString(part *ErrPart, kind string) string {
+	options := f.optionsOrDefault()
+
 	var buf strings.Builder
 
 	if part.Type != "" {
 		buf.WriteString("[")
 		buf.WriteString(string(part.Type))
 		buf.WriteString("]")
-		buf.WriteString(f.options.Spacing)
+		buf.WriteString(options.Spacing)
 	}
 
 	buf.WriteString(part.Message)
@@ -180,17 +187,17 @@ func (f *Formatter) formatPartString(part *ErrPart, kind string) string {
 		buf.WriteString("\n\nFields:")
 
 		for _, k := range slices.Sorted(maps.Keys(part.Fields)) {
-			fmt.Fprintf(&buf, "\n%s%s:%s%v", f.options.Indentation, k, f.options.Spacing, part.Fields[k])
+			fmt.Fprintf(&buf, "\n%s%s:%s%v", options.Indentation, k, options.Spacing, part.Fields[k])
 		}
 	}
 
-	if f.options.WithTrace && len(part.Stack) > 0 {
+	if options.WithTrace && len(part.Stack) > 0 {
 		frames := part.Stack
 
 		fmt.Fprintf(&buf, "\n\n%s Trace:", kind)
 
 		for _, frame := range frames {
-			fmt.Fprintf(&buf, "\n%s%s%s(%s:%d)", f.options.Indentation, frame.Name, f.options.Spacing, frame.File, frame.Line)
+			fmt.Fprintf(&buf, "\n%s%s%s(%s:%d)", options.Indentation, frame.Name, options.Spacing, frame.File, frame.Line)
 		}
 	}
 
@@ -206,7 +213,7 @@ func (f *Formatter) formatPartString(part *ErrPart, kind string) string {
 // Returns:
 //   - (string): the formatted string
 func (f *Formatter) formatExternalString(err error) string {
-	if f.options.WithTrace {
+	if f.optionsOrDefault().WithTrace {
 		return fmt.Sprintf("%+v", err)
 	}
 
@@ -222,11 +229,13 @@ func (f *Formatter) formatExternalString(err error) string {
 // Returns:
 //   - (string): the formatted string
 func (f *Formatter) formatJoinedString(joinErr *joined) string {
+	options := f.optionsOrDefault()
+
 	var buf strings.Builder
 
 	fmt.Fprintf(&buf, "Multiple errors (%d):", len(joinErr.errs))
 
-	if f.options.WithTrace && joinErr.trace != nil {
+	if options.WithTrace && joinErr.trace != nil {
 		frames := joinErr.trace.resolveToStackFrames()
 
 		if len(frames) > 0 {
@@ -234,7 +243,7 @@ func (f *Formatter) formatJoinedString(joinErr *joined) string {
 
 			frame := frames[0]
 
-			fmt.Fprintf(&buf, "\n%s%s%s(%s:%d)", f.options.Indentation, frame.Name, f.options.Spacing, frame.File, frame.Line)
+			fmt.Fprintf(&buf, "\n%s%s%s(%s:%d)", options.Indentation, frame.Name, options.Spacing, frame.File, frame.Line)
 		}
 	}
 
@@ -258,10 +267,12 @@ func (f *Formatter) formatJoinedString(joinErr *joined) string {
 // Returns:
 //   - (map[string]any): the formatted map
 func (f *Formatter) formatChainJSON(err error) map[string]any {
-	unpacked := unpack(err, f.options.WithTrace)
+	options := f.optionsOrDefault()
+
+	unpacked := unpack(err, options.WithTrace)
 	result := make(map[string]any)
 
-	if unpacked.External != nil && (f.options.WithExternal || f.isOnlyExternal(&unpacked)) {
+	if unpacked.External != nil && (options.WithExternal || f.isOnlyExternal(&unpacked)) {
 		result["external"] = map[string]any{
 			"message": unpacked.External.Error(),
 			"go_type": fmt.Sprintf("%T", unpacked.External),
@@ -279,7 +290,7 @@ func (f *Formatter) formatChainJSON(err error) map[string]any {
 			chain = append(chain, f.formatPartJSON(&part))
 		}
 
-		if f.options.InnerFirst {
+		if options.InnerFirst {
 			slices.Reverse(chain)
 		}
 
@@ -298,6 +309,8 @@ func (f *Formatter) formatChainJSON(err error) map[string]any {
 // Returns:
 //   - (map[string]any): the formatted map
 func (f *Formatter) formatPartJSON(part *ErrPart) map[string]any {
+	options := f.optionsOrDefault()
+
 	result := map[string]any{
 		"message": part.Message,
 	}
@@ -310,7 +323,7 @@ func (f *Formatter) formatPartJSON(part *ErrPart) map[string]any {
 		result["fields"] = part.Fields
 	}
 
-	if f.options.WithTrace && len(part.Stack) > 0 {
+	if options.WithTrace && len(part.Stack) > 0 {
 		stack := part.Stack
 
 		frames := make([]map[string]any, 0, len(stack))
@@ -325,7 +338,7 @@ func (f *Formatter) formatPartJSON(part *ErrPart) map[string]any {
 			frames = append(frames, frameMap)
 		}
 
-		if f.options.InvertTrace {
+		if options.InvertTrace {
 			slices.Reverse(frames)
 		}
 
@@ -346,12 +359,14 @@ func (f *Formatter) formatPartJSON(part *ErrPart) map[string]any {
 // Returns:
 //   - (map[string]any): the formatted map
 func (f *Formatter) formatJoinedJSON(joinErr *joined) map[string]any {
+	options := f.optionsOrDefault()
+
 	result := map[string]any{
 		"kind":  "joined",
 		"count": len(joinErr.errs),
 	}
 
-	if f.options.WithTrace && joinErr.trace != nil {
+	if options.WithTrace && joinErr.trace != nil {
 		frames := joinErr.trace.resolveToStackFrames()
 
 		if len(frames) > 0 {
@@ -441,14 +456,7 @@ type FormatterOptionFunc func(options *FormatterOptions)
 // Returns:
 //   - formatter (*Formatter): the new formatter instance
 func NewFormatter(ofs ...FormatterOptionFunc) (formatter *Formatter) {
-	options := &FormatterOptions{
-		InnerFirst:   false,
-		WithTrace:    false,
-		InvertTrace:  false,
-		WithExternal: true,
-		Spacing:      " ",
-		Indentation:  "  ",
-	}
+	options := defaultFormatterOptions()
 
 	for _, f := range ofs {
 		if f != nil {
@@ -459,6 +467,36 @@ func NewFormatter(ofs ...FormatterOptionFunc) (formatter *Formatter) {
 	return &Formatter{
 		options: options,
 	}
+}
+
+// defaultFormatterOptions returns the options NewFormatter starts from:
+// outer-first, no trace, no invert, include external, space " ", indent "  ".
+//
+// Returns:
+//   - options (*FormatterOptions): the default formatting options
+func defaultFormatterOptions() (options *FormatterOptions) {
+	return &FormatterOptions{
+		InnerFirst:   false,
+		WithTrace:    false,
+		InvertTrace:  false,
+		WithExternal: true,
+		Spacing:      " ",
+		Indentation:  "  ",
+	}
+}
+
+// optionsOrDefault returns the formatter's options, falling back to the
+// NewFormatter defaults when they are nil — that is, when the Formatter was
+// not built by NewFormatter (for example a zero-value Formatter{}).
+//
+// Returns:
+//   - options (*FormatterOptions): the effective formatting options
+func (f *Formatter) optionsOrDefault() (options *FormatterOptions) {
+	if f.options != nil {
+		return f.options
+	}
+
+	return defaultFormatterOptions()
 }
 
 // FormatterWithTrace returns an option function to enable stack traces.
@@ -660,16 +698,16 @@ func formatError(s fmt.State, verb rune, err error) {
 	switch verb {
 	case 'v':
 		if s.Flag('+') {
-			io.WriteString(s, ToString(err, FormatterWithTrace()))
+			_, _ = io.WriteString(s, ToString(err, FormatterWithTrace()))
 
 			return
 		}
 
-		io.WriteString(s, err.Error())
+		_, _ = io.WriteString(s, err.Error())
 	case 'q':
-		io.WriteString(s, strconv.Quote(err.Error()))
+		_, _ = io.WriteString(s, strconv.Quote(err.Error()))
 	default:
-		io.WriteString(s, err.Error())
+		_, _ = io.WriteString(s, err.Error())
 	}
 }
 
@@ -678,7 +716,7 @@ func formatError(s fmt.State, verb rune, err error) {
 // [ToString] with [FormatterWithTrace]).
 func (e *root) Format(s fmt.State, verb rune) {
 	if e == nil {
-		io.WriteString(s, "<nil>")
+		_, _ = io.WriteString(s, "<nil>")
 
 		return
 	}
@@ -691,7 +729,7 @@ func (e *root) Format(s fmt.State, verb rune) {
 // [ToString] with [FormatterWithTrace]).
 func (e *wrapped) Format(s fmt.State, verb rune) {
 	if e == nil {
-		io.WriteString(s, "<nil>")
+		_, _ = io.WriteString(s, "<nil>")
 
 		return
 	}
@@ -705,7 +743,7 @@ func (e *wrapped) Format(s fmt.State, verb rune) {
 // [FormatterWithTrace]).
 func (e *joined) Format(s fmt.State, verb rune) {
 	if e == nil {
-		io.WriteString(s, "<nil>")
+		_, _ = io.WriteString(s, "<nil>")
 
 		return
 	}

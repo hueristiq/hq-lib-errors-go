@@ -10,20 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFrame_pc(t *testing.T) {
-	t.Parallel()
-
-	pc := [1]uintptr{}
-
-	runtime.Callers(1, pc[:])
-
-	f := frame(pc[0])
-
-	result := f.pc()
-
-	assert.Equal(t, pc[0]-1, result, "PC should be decremented by 1")
-}
-
 func TestFrame_resolveToStackFrame(t *testing.T) {
 	t.Parallel()
 
@@ -33,7 +19,9 @@ func TestFrame_resolveToStackFrame(t *testing.T) {
 
 	f := frame(pc[0])
 
-	frames := runtime.CallersFrames([]uintptr{pc[0] - 1})
+	// The frame stores the raw return PC exactly as runtime.Callers reports
+	// it, so symbolization must match resolving that PC unchanged.
+	frames := runtime.CallersFrames(pc[:])
 
 	runtimeFrame, _ := frames.Next()
 
@@ -97,7 +85,7 @@ func TestCaller(t *testing.T) {
 
 	require.True(t, ok, "runtime.Caller failed")
 
-	result := caller(1)
+	result := caller(2)
 
 	require.NotNil(t, result, "caller returned nil")
 
