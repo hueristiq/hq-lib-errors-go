@@ -689,8 +689,6 @@ func TestFormatVerbs(t *testing.T) {
 	})
 }
 
-// formatf renders err through fmt with the given verb, exercising the
-// fmt.Formatter implementations of the package's error types.
 func formatf(verb string, err error) (out string) {
 	var buf strings.Builder
 

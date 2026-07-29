@@ -808,8 +808,6 @@ func TestWrappedStackFramesSymbolizeLikeStack(t *testing.T) {
 	pcs := err.StackFrames()
 	require.Len(t, pcs, 1)
 
-	// The raw PC must feed runtime.CallersFrames unchanged and resolve to the
-	// same wrap-site frame that Stack reports.
 	runtimeFrame, _ := runtime.CallersFrames(pcs).Next()
 
 	expectedName := runtimeFrame.Function
@@ -1088,8 +1086,6 @@ func (e *multiError) Unwrap() []error {
 	return e.errs
 }
 
-// cyclicError builds single-error Unwrap chains that loop, for exercising the
-// cycle guard in Cause.
 type cyclicError struct {
 	next *cyclicError
 }

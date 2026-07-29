@@ -19,8 +19,6 @@ func TestFrame_resolveToStackFrame(t *testing.T) {
 
 	f := frame(pc[0])
 
-	// The frame stores the raw return PC exactly as runtime.Callers reports
-	// it, so symbolization must match resolving that PC unchanged.
 	frames := runtime.CallersFrames(pc[:])
 
 	runtimeFrame, _ := frames.Next()
@@ -58,8 +56,6 @@ func TestStack_resolveToStackFrames(t *testing.T) {
 	for {
 		runtimeFrame, more := frames.Next()
 
-		// resolveToStackFrames drops runtime-internal frames, so only
-		// non-runtime frames are compared against its output.
 		if !strings.HasPrefix(runtimeFrame.Function, "runtime.") {
 			require.Less(t, i, len(result), "More non-runtime frames from runtime than from resolveToStackFrames")
 
