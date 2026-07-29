@@ -2,7 +2,7 @@
 
 ![made with go](https://img.shields.io/badge/made%20with-Go-1E90FF.svg) [![go reference](https://pkg.go.dev/badge/github.com/hueristiq/hq-lib-errors-go.svg)](https://pkg.go.dev/github.com/hueristiq/hq-lib-errors-go) [![license](https://img.shields.io/badge/license-MIT-gray.svg?color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/blob/main/LICENSE) ![maintenance](https://img.shields.io/badge/maintained%3F-yes-1E90FF.svg) [![open issues](https://img.shields.io/github/issues-raw/hueristiq/hq-lib-errors-go.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/issues?q=is:issue+is:open) [![closed issues](https://img.shields.io/github/issues-closed-raw/hueristiq/hq-lib-errors-go.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/issues?q=is:issue+is:closed) [![contribution](https://img.shields.io/badge/contributions-welcome-1E90FF.svg)](https://github.com/hueristiq/hq-lib-errors-go/blob/main/CONTRIBUTING.md)
 
-`hq-lib-errors-go` is a [Go (Golang)](http://golang.org/) package for rich, structured error handling.
+`hq-lib-errors-go` is a [Go (Golang)](https://golang.org/) package for rich, structured error handling.
 
 ## Resources
 
@@ -22,14 +22,14 @@
 
 ## Features
 
-- **Stack traces**: every error captures where it was created; raw program counters are stored at the call site and resolved to file/line/function lazily, only when an error is formatted with traces enabled, so error creation stays cheap.
-- **Error wrapping**: add context as an error propagates while preserving the original error and its trace. Wrapping never mutates the wrapped error.
-- **Type classification**: tag errors with a `Type` for programmatic handling.
-- **Structured fields**: attach arbitrary key-value metadata (request IDs, parameters, …) for richer debugging and structured logs.
-- **Multi-error aggregation**: `Join` combines several errors into one that unwraps to all of them and records where the join happened.
-- **Flexible formatting**: render an error chain as a human-readable string or a JSON-ready map, with options to include/exclude stack traces, invert order, or include external errors.
-- **Standards-compliant**: implements `error`, `Unwrap`, `Is`, and `As`, and interoperates with errors from any source.
-- **Concurrency-safe**: errors are safe to share, format, and inspect across goroutines.
+- **Stack Traces:** Every error captures where it was created; raw program counters are stored at the call site and resolved to file/line/function lazily, only when an error is formatted with traces enabled, so error creation stays cheap.
+- **Error Wrapping:** Add context as an error propagates while preserving the original error and its trace. Wrapping never mutates the wrapped error.
+- **Type Classification:** Tag errors with a `Type` for programmatic handling.
+- **Structured Fields:** Attach arbitrary key-value metadata (request IDs, parameters, …) for richer debugging and structured logs.
+- **Multi-Error Aggregation:** `Join` combines several errors into one that unwraps to all of them and records where the join happened.
+- **Flexible Formatting:** Render an error chain as a human-readable string or a JSON-ready map, with options to include/exclude stack traces, invert order, or include external errors.
+- **Standards-Compliant:** Implements `error`, `Unwrap`, `Is`, and `As`, and interoperates with errors from any source.
+- **Concurrency-Safe:** Errors are safe to share, format, and inspect across goroutines.
 
 ## Installation
 
@@ -218,12 +218,12 @@ Fields:
   FIELD_KEY_2: FIELD_VALUE_2
 
 wrap Trace:
-  main.main (/home/.../hq-lib-errors-go/examples/basic/main.go:13)
+  main.main (/home/.../main.go:13)
 
 wrap error example 1!
 
 wrap Trace:
-  main.main (/home/.../hq-lib-errors-go/examples/basic/main.go:12)
+  main.main (/home/.../main.go:12)
 
 [ERROR_TYPE] root error example!
 
@@ -232,7 +232,7 @@ Fields:
   FIELD_KEY_2: FIELD_VALUE_2
 
 root Trace:
-  main.main (/home/.../hq-lib-errors-go/examples/basic/main.go:10)
+  main.main (/home/.../main.go:10)
 ```
 
 #### ... to JSON
@@ -273,7 +273,7 @@ output:
       "message": "wrap error example 2!",
       "stack": [
         {
-          "file": "/home/.../hq-lib-errors-go/examples/basic/main.go",
+          "file": "/home/.../main.go",
           "function": "main.main",
           "line": 13
         }
@@ -284,7 +284,7 @@ output:
       "message": "wrap error example 1!",
       "stack": [
         {
-          "file": "/home/.../hq-lib-errors-go/examples/basic/main.go",
+          "file": "/home/.../main.go",
           "function": "main.main",
           "line": 12
         }
@@ -299,7 +299,7 @@ output:
     "message": "root error example!",
     "stack": [
       {
-        "file": "/home/.../hq-lib-errors-go/examples/basic/main.go",
+        "file": "/home/.../main.go",
         "function": "main.main",
         "line": 10
       }
