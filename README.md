@@ -22,11 +22,11 @@
 
 ## Features
 
-- **Stack Traces:** Every error captures where it was created.
+- **Stack Traces:** Every error captures its creation site.
 - **Classification:** Tag errors with a `Type` for programmatic handling.
-- **Structured Fields:** Attach key-value metadata for richer debugging and structured logs.
-- **Flexible Formatting:** Render an error chain as a human-readable string or a JSON-ready map.
-- **Multi-Error Aggregation:** `Join` combines several errors into one that unwraps to all of them and records where the join happened.
+- **Structured Fields:** Attach key-value metadata for debugging and structured logs.
+- **Flexible Formatting:** Render error chains as strings or JSON-ready maps.
+- **Multi-Error Aggregation:** `Join` merges errors into one that unwraps to all of them.
 
 ## Installation
 
