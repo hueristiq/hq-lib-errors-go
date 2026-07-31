@@ -22,14 +22,11 @@
 
 ## Features
 
-- **Stack Traces:** Every error captures where it was created; raw program counters are stored at the call site and resolved to file/line/function lazily, only when an error is formatted with traces enabled, so error creation stays cheap.
-- **Error Wrapping:** Add context as an error propagates while preserving the original error and its trace. Wrapping never mutates the wrapped error.
-- **Structured Fields:** Attach arbitrary key-value metadata (request IDs, parameters, …) for richer debugging and structured logs.
-- **Type Classification:** Tag errors with a `Type` for programmatic handling.
-- **Flexible Formatting:** Render an error chain as a human-readable string or a JSON-ready map, with options to include/exclude stack traces, invert order, or include external errors.
+- **Stack Traces:** Every error captures where it was created.
+- **Classification:** Tag errors with a `Type` for programmatic handling.
+- **Structured Fields:** Attach arbitrary key-value metadata for richer debugging and structured logs.
+- **Flexible Formatting:** Render an error chain as a human-readable string or a JSON-ready map.
 - **Multi-Error Aggregation:** `Join` combines several errors into one that unwraps to all of them and records where the join happened.
-- **Standards-Compliant:** Implements `error`, `Unwrap`, `Is`, and `As`, and interoperates with errors from any source.
-- **Concurrency-Safe:** Errors are safe to share, format, and inspect across goroutines.
 
 ## Installation
 
