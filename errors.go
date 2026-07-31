@@ -1,6 +1,7 @@
 package errors
 
 import (
+	"fmt"
 	"maps"
 	"reflect"
 	"slices"
@@ -60,17 +61,11 @@ func (e *root) Error() (msg string) {
 		return "<nil>"
 	}
 
-	msg = e.message
-
-	if e.cause != nil {
-		if msg != "" {
-			msg += ": "
-		}
-
-		msg += e.cause.Error()
+	if e.cause == nil {
+		return e.message
 	}
 
-	return msg
+	return chainMessage(e)
 }
 
 // Fields returns a snapshot copy of all structured fields attached to the error.
@@ -92,20 +87,38 @@ func (e *root) Fields() (fields map[string]any) {
 	return
 }
 
-// StackFrames returns the raw PCs (program counters) from the call stack.
-// These can be used to reconstruct the full stack trace.
+// StackFrames returns the raw PCs (program counters) of the call stack,
+// exactly as recorded by runtime.Callers. Feed them to runtime.CallersFrames
+// unchanged to symbolize the full stack trace.
 //
 // The returned slice is a copy; mutating it does not affect the error.
 //
 // Returns:
-//   - frames ([]uintptr): slice of program counters representing the call stack,
+//   - pcs ([]uintptr): slice of raw program counters representing the call stack,
 //     or nil if receiver or trace is nil
-func (e *root) StackFrames() (frames []uintptr) {
+func (e *root) StackFrames() (pcs []uintptr) {
 	if e == nil || e.trace == nil {
 		return nil
 	}
 
 	return slices.Clone(*e.trace)
+}
+
+// Stack returns the captured call stack as resolved frames, most recent call
+// first. The raw PCs are symbolized into function, file, and line at call
+// time; use [root.StackFrames] when raw PCs suffice.
+//
+// Returns:
+//   - frames (Stack): the resolved stack frames, or nil if the receiver or its
+//     trace is nil
+func (e *root) Stack() (frames Stack) {
+	if e == nil || e.trace == nil {
+		return
+	}
+
+	frames = e.trace.resolveToStackFrames()
+
+	return
 }
 
 // Is reports whether target is another *root with the same message and a
@@ -201,8 +214,8 @@ func (e *root) Unwrap() (cause error) {
 //   - errType (Type): the Type to assign to this error
 //
 // Returns:
-//   - err (Error): the modified error (supports method chaining) or nil if receiver is nil
-func (e *root) SetType(errType Type) (err Error) {
+//   - err (MutableError): the modified error (supports method chaining) or nil if receiver is nil
+func (e *root) SetType(errType Type) (err MutableError) {
 	if e == nil {
 		return
 	}
@@ -228,8 +241,8 @@ func (e *root) SetType(errType Type) (err Error) {
 //   - value (any): field value (any serializable type)
 //
 // Returns:
-//   - err (Error): the modified error (supports method chaining) or nil if receiver is nil
-func (e *root) SetField(key string, value any) (err Error) {
+//   - err (MutableError): the modified error (supports method chaining) or nil if receiver is nil
+func (e *root) SetField(key string, value any) (err MutableError) {
 	if e == nil {
 		return
 	}
@@ -257,14 +270,14 @@ func (e *root) SetField(key string, value any) (err Error) {
 //   - message (string): human-readable error message
 //   - fields (map[string]any): additional structured context (key-value pairs)
 //   - cause (error): underlying error being wrapped
-//   - frame (*frame): stack frame where the wrap occurred
+//   - frame (frame): raw PC of the wrap-site frame, stored by value (0 means absent)
 type wrapped struct {
 	mu      sync.RWMutex
 	errType Type
 	message string
 	fields  map[string]any
 	cause   error
-	frame   *frame
+	frame   frame
 }
 
 // Type returns the error's classification type, or the empty Type if none was
@@ -297,17 +310,87 @@ func (e *wrapped) Error() (msg string) {
 		return "<nil>"
 	}
 
-	msg = e.message
-
-	if e.cause != nil {
-		if msg != "" {
-			msg += ": "
-		}
-
-		msg += e.cause.Error()
+	if e.cause == nil {
+		return e.message
 	}
 
-	return msg
+	return chainMessage(e)
+}
+
+// chainMessage builds an error chain's full message iteratively: each error's
+// own message is joined to the rest of the chain with ": " when that message
+// is non-empty. The chain is walked twice — once to size a single
+// strings.Builder exactly, once to write each part — which keeps Error()
+// linear in the chain depth instead of the O(depth²) copying produced by
+// recursive string concatenation. The first error that is not a *root or
+// *wrapped (an external error, or a *joined) terminates the walk and
+// contributes its own Error() output as the tail, resolved exactly once.
+//
+// Parameters:
+//   - head (error): the first error in the chain (a non-nil *root or *wrapped)
+//
+// Returns:
+//   - msg (string): the chain's combined message
+func chainMessage(head error) (msg string) {
+	total := 0
+	tail := ""
+
+	for cur := head; cur != nil; {
+		switch e := cur.(type) {
+		case *root:
+			total += len(e.message)
+
+			if e.cause != nil && e.message != "" {
+				total += len(": ")
+			}
+
+			cur = e.cause
+		case *wrapped:
+			total += len(e.message)
+
+			if e.cause != nil && e.message != "" {
+				total += len(": ")
+			}
+
+			cur = e.cause
+		default:
+			tail = cur.Error()
+			total += len(tail)
+
+			cur = nil
+		}
+	}
+
+	var sb strings.Builder
+
+	sb.Grow(total)
+
+	for cur := head; cur != nil; {
+		switch e := cur.(type) {
+		case *root:
+			sb.WriteString(e.message)
+
+			if e.cause != nil && e.message != "" {
+				sb.WriteString(": ")
+			}
+
+			cur = e.cause
+		case *wrapped:
+			sb.WriteString(e.message)
+
+			if e.cause != nil && e.message != "" {
+				sb.WriteString(": ")
+			}
+
+			cur = e.cause
+		default:
+			sb.WriteString(tail)
+
+			cur = nil
+		}
+	}
+
+	return sb.String()
 }
 
 // Fields returns a snapshot copy of all structured fields attached to the error.
@@ -329,20 +412,39 @@ func (e *wrapped) Fields() (fields map[string]any) {
 	return
 }
 
-// StackFrames returns the raw program counters from the call stack.
-// These can be used to reconstruct the full stack trace.
+// StackFrames returns the raw program counters of the captured call stack,
+// exactly as recorded by runtime.Callers and ready for runtime.CallersFrames.
 //
 // For wrapped errors, this returns a single-frame stack containing the wrap point.
 //
+// The returned slice is a copy; mutating it does not affect the error.
+//
 // Returns:
-//   - frames ([]uintptr): slice of program counters representing the call stack,
-//     or nil if the receiver or its frame is nil
-func (e *wrapped) StackFrames() (frames []uintptr) {
-	if e == nil || e.frame == nil {
+//   - pcs ([]uintptr): slice of raw program counters representing the call stack,
+//     or nil if the receiver is nil or no wrap-site frame was captured
+func (e *wrapped) StackFrames() (pcs []uintptr) {
+	if e == nil || e.frame == 0 {
 		return
 	}
 
-	frames = []uintptr{e.frame.pc()}
+	pcs = []uintptr{uintptr(e.frame)}
+
+	return
+}
+
+// Stack returns the wrap-site location as a single resolved frame. The raw PC
+// is symbolized into function, file, and line at call time; use
+// [wrapped.StackFrames] when the raw PC suffices.
+//
+// Returns:
+//   - frames (Stack): the resolved wrap-site frame, or nil if the receiver is
+//     nil or no wrap-site frame was captured
+func (e *wrapped) Stack() (frames Stack) {
+	if e == nil || e.frame == 0 {
+		return
+	}
+
+	frames = Stack{e.frame.resolveToStackFrame()}
 
 	return
 }
@@ -440,8 +542,8 @@ func (e *wrapped) Unwrap() (cause error) {
 //   - errType (Type): the Type to assign to this error
 //
 // Returns:
-//   - err (Error): the modified error (supports method chaining) or nil if receiver is nil
-func (e *wrapped) SetType(errType Type) (err Error) {
+//   - err (MutableError): the modified error (supports method chaining) or nil if receiver is nil
+func (e *wrapped) SetType(errType Type) (err MutableError) {
 	if e == nil {
 		return
 	}
@@ -467,8 +569,8 @@ func (e *wrapped) SetType(errType Type) (err Error) {
 //   - value (any): field value (any serializable type)
 //
 // Returns:
-//   - err (Error): the modified error (supports method chaining) or nil if receiver is nil
-func (e *wrapped) SetField(key string, value any) (err Error) {
+//   - err (MutableError): the modified error (supports method chaining) or nil if receiver is nil
+func (e *wrapped) SetField(key string, value any) (err MutableError) {
 	if e == nil {
 		return
 	}
@@ -519,13 +621,14 @@ func (e *joined) Error() (msg string) {
 	return strings.Join(messages, "\n")
 }
 
-// StackFrames returns the raw program counters from the call stack at the join point.
+// StackFrames returns the raw program counters of the call stack at the join
+// point, exactly as recorded by runtime.Callers and ready for runtime.CallersFrames.
 //
 // The returned slice is a copy; mutating it does not affect the error.
 //
 // Returns:
-//   - frames ([]uintptr): slice of program counters representing the call stack or nil if receiver or trace is nil
-func (e *joined) StackFrames() (frames []uintptr) {
+//   - pcs ([]uintptr): slice of raw program counters representing the call stack or nil if receiver or trace is nil
+func (e *joined) StackFrames() (pcs []uintptr) {
 	if e == nil || e.trace == nil {
 		return nil
 	}
@@ -583,12 +686,13 @@ func (e *joined) Unwrap() (errs []error) {
 	return e.errs
 }
 
-// Error is the common interface implemented by every error this package creates
-// (those returned by [New] and [Wrap]). It extends the standard error interface
-// with type classification, structured fields, and stack traces.
+// Error is the read-only inspection interface implemented by every error this
+// package creates (those returned by [New] and [Wrap]). It extends the standard
+// error interface with type classification, structured fields, and stack traces.
 //
 // Use [As] (or a type assertion) to obtain an Error from an opaque error value.
-// Implementations are safe for concurrent use.
+// Implementations are safe for concurrent use. For post-construction mutation,
+// see [MutableError].
 type Error interface {
 	error
 
@@ -598,21 +702,32 @@ type Error interface {
 	// Fields returns a snapshot copy of the error's structured fields.
 	Fields() (fields map[string]interface{})
 
-	// StackFrames returns the raw program counters of the captured call stack.
-	// The returned slice is a copy; mutating it does not affect the error.
-	StackFrames() (PCs []uintptr)
+	// Stack returns the captured call stack as resolved frames, most recent
+	// call first. Resolution from raw PCs happens at call time.
+	Stack() (frames Stack)
 
-	// Is reports whether target is considered equal to this error.
-	Is(target error) (result bool)
+	// StackFrames returns the raw program counters of the captured call stack,
+	// exactly as recorded by runtime.Callers; pass them to
+	// runtime.CallersFrames unchanged to symbolize them. The returned slice is
+	// a copy; mutating it does not affect the error.
+	StackFrames() (pcs []uintptr)
+}
 
-	// As assigns this error to target if their types are compatible.
-	As(target interface{}) (result bool)
+// MutableError extends [Error] with post-construction, thread-safe mutation of
+// the classification type and structured fields. It is the interface option
+// functions receive (see [OptionFunc]); obtain it from an opaque error with
+// [As] or a type assertion.
+//
+// Prefer configuring errors at creation time with [WithType] and [WithField]:
+// mutating a shared error changes what every holder of it observes.
+type MutableError interface {
+	Error
 
 	// SetType sets the classification type and returns the error for chaining.
-	SetType(errType Type) (err Error)
+	SetType(errType Type) (err MutableError)
 
 	// SetField adds a key-value field and returns the error for chaining.
-	SetField(key string, value interface{}) (err Error)
+	SetField(key string, value interface{}) (err MutableError)
 }
 
 // Type is a classification label for an error, letting callers categorize and
@@ -621,30 +736,37 @@ type Error interface {
 // [Error.Type]. The empty Type means unclassified.
 type Type string
 
-// OptionFunc configures an [Error] at construction time. Pass option functions
-// such as [WithType] and [WithField] to [New] and [Wrap]. A nil OptionFunc is
-// ignored.
-type OptionFunc func(err Error)
+// OptionFunc configures a [MutableError] at construction time. Pass option
+// functions such as [WithType] and [WithField] to [New] and [Wrap]. A nil
+// OptionFunc is ignored.
+type OptionFunc func(err MutableError)
 
 // Compile-time assertions that the concrete error types satisfy their intended
-// interfaces. root and wrapped implement the full Error interface; joined
-// implements only the standard error interface (it carries no type or fields).
+// interfaces. root and wrapped implement the full MutableError interface;
+// joined implements only the standard error interface (it carries no type or
+// fields); all three implement fmt.Formatter for %-verb printing.
 var (
-	_ Error = (*root)(nil)
-	_ Error = (*wrapped)(nil)
-	_ error = (*joined)(nil)
+	_ Error         = (*root)(nil)
+	_ MutableError  = (*root)(nil)
+	_ fmt.Formatter = (*root)(nil)
+	_ Error         = (*wrapped)(nil)
+	_ MutableError  = (*wrapped)(nil)
+	_ fmt.Formatter = (*wrapped)(nil)
+	_ error         = (*joined)(nil)
+	_ fmt.Formatter = (*joined)(nil)
 )
 
 // New creates a new root error, capturing a stack trace starting at the caller.
 //
 // The captured program counters are stored unresolved; symbolization into
 // file, line, and function happens lazily during formatting, so New stays cheap
-// even on hot paths (see BenchmarkNew). At most 64 stack frames are captured;
+// even on hot paths. At most 64 stack frames are captured;
 // deeper stacks are truncated. Pass [WithType] and [WithField] options to
 // classify the error and attach structured context at creation time.
 //
-// The returned error always implements the [Error] interface; type-assert to it
-// (or use [As]) to reach [Error.Type], [Error.Fields], and [Error.StackFrames].
+// The returned error always implements the [Error] and [MutableError]
+// interfaces; type-assert to them (or use [As]) to reach [Error.Type],
+// [Error.Fields], [Error.Stack], and [Error.StackFrames].
 //
 // Parameters:
 //   - msg (string): the primary, human-readable error message.
@@ -715,8 +837,8 @@ func Wrap(cause error, msg string, ofs ...OptionFunc) (err error) {
 //     This message becomes part of the error chain and appears in Error() output.
 //
 // Returns:
-//   - err (Error): The newly created wrapping error that implements the Error interface.
-func wrap(cause error, msg string) (err Error) {
+//   - err (MutableError): The newly created wrapping error.
+func wrap(cause error, msg string) (err MutableError) {
 	if cause == nil {
 		return nil
 	}
@@ -726,7 +848,7 @@ func wrap(cause error, msg string) (err Error) {
 		err = &wrapped{
 			message: msg,
 			cause:   cause,
-			frame:   caller(3), // caller(3) skips caller, this method (wrap), and Wrap
+			frame:   callerPC(4), // callerPC(4) skips runtime.Callers, callerPC, this method (wrap), and Wrap
 		}
 	default:
 		err = &root{
@@ -747,8 +869,8 @@ func wrap(cause error, msg string) (err Error) {
 // Returns:
 //   - f (OptionFunc): configuration function for New/Wrap
 func WithType(errType Type) (f OptionFunc) {
-	return func(err Error) {
-		err.SetType(errType)
+	return func(err MutableError) {
+		_ = err.SetType(errType)
 	}
 }
 
@@ -761,8 +883,8 @@ func WithType(errType Type) (f OptionFunc) {
 // Returns:
 //   - f (OptionFunc): configuration function for New/Wrap
 func WithField(key string, value any) (f OptionFunc) {
-	return func(err Error) {
-		err.SetField(key, value)
+	return func(err MutableError) {
+		_ = err.SetField(key, value)
 	}
 }
 
@@ -787,6 +909,14 @@ func Unwrap(err error) (cause error) {
 // Implements an enhanced version of errors.Is from the standard library.
 //
 // It delegates to the internal is function for recursive checking.
+//
+// Note: errors created by this package compare by value, not identity — a root
+// or wrapped error matches any target of the same concrete type with an equal
+// message and a compatible [Type] (an empty target Type matches any Type).
+// This differs from the standard library's errors.New, whose values only match
+// themselves: two distinct [New] calls with the same arguments produce errors
+// that match each other here. Create sentinel errors once and reuse them when
+// identity matters.
 //
 // Parameters:
 //   - err (error): the error to inspect.
@@ -842,9 +972,9 @@ func is(err, target error, isComparable bool) (matches bool) {
 }
 
 // As searches err's chain for an error assignable to target and sets target if found.
-// Implements an enhanced version of errors.As from the standard library.
-//
-// It validates the target and delegates to the internal as function.
+// Matches the behavior of errors.As in the standard library, including
+// panicking when target is invalid: target must be a non-nil pointer to a type
+// that implements error, or to any interface type.
 //
 // Parameters:
 //   - err (error): the error to inspect.
@@ -853,21 +983,25 @@ func is(err, target error, isComparable bool) (matches bool) {
 // Returns:
 //   - ok (bool): true if a matching error was found and target was set.
 func As(err error, target any) (ok bool) {
-	if target == nil || err == nil {
+	if err == nil {
 		return false
+	}
+
+	if target == nil {
+		panic("errors: target cannot be nil")
 	}
 
 	val := reflect.ValueOf(target)
 	typ := val.Type()
 
 	if typ.Kind() != reflect.Pointer || val.IsNil() {
-		return false
+		panic("errors: target must be a non-nil pointer")
 	}
 
 	targetType := typ.Elem()
 
 	if targetType.Kind() != reflect.Interface && !targetType.Implements(reflect.TypeOf((*error)(nil)).Elem()) {
-		return false
+		panic("errors: *target must be interface or implement error")
 	}
 
 	return as(err, target, val, targetType)
@@ -922,13 +1056,43 @@ func as(err error, target any, targetVal reflect.Value, targetType reflect.Type)
 // Cause returns the underlying root cause of the error by recursively unwrapping.
 // Unlike Unwrap, it follows the entire chain to the original error.
 //
+// Cause follows single-error unwrapping only: it does not descend into the
+// branches of a joined error (one created by [Join], or any error with an
+// Unwrap() []error method) and instead returns the joined error itself.
+//
+// The traversal is guarded against cycles: the first few hops are walked
+// without tracking (real chains are short and acyclic, so they never pay for
+// the guard); beyond that, visited errors are recorded, and if the chain loops
+// back to one of them, Cause returns that error instead of looping forever.
+// Errors whose dynamic type is not comparable cannot be tracked and are not
+// guarded.
+//
 // Parameters:
 //   - err (error): the error to inspect.
 //
 // Returns:
 //   - cause (error): The deepest non-wrapped error in the chain.
 func Cause(err error) (cause error) {
-	for {
+	// cycleTrackThreshold bounds the hops walked without cycle tracking; the
+	// seen-map (and its allocation) is only paid for chains longer than that,
+	// which in practice means adversarial cyclic ones.
+	const cycleTrackThreshold = 8
+
+	var seen map[error]struct{}
+
+	for hop := 0; err != nil; hop++ {
+		if hop >= cycleTrackThreshold && reflect.TypeOf(err).Comparable() {
+			if seen == nil {
+				seen = make(map[error]struct{})
+			}
+
+			if _, ok := seen[err]; ok {
+				return err
+			}
+
+			seen[err] = struct{}{}
+		}
+
 		uerr := Unwrap(err)
 		if uerr == nil {
 			return err
@@ -936,6 +1100,8 @@ func Cause(err error) (cause error) {
 
 		err = uerr
 	}
+
+	return nil
 }
 
 // Join combines multiple errors into a single joined error.

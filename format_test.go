@@ -3,6 +3,8 @@ package errors
 import (
 	stderrors "errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,7 +19,7 @@ func TestNewFormatter(t *testing.T) {
 
 		f := NewFormatter()
 
-		assert.False(t, f.options.IsInnerFirst)
+		assert.False(t, f.options.InnerFirst)
 		assert.False(t, f.options.WithTrace)
 		assert.False(t, f.options.InvertTrace)
 		assert.True(t, f.options.WithExternal)
@@ -28,10 +30,10 @@ func TestNewFormatter(t *testing.T) {
 	t.Run("applies options", func(t *testing.T) {
 		t.Parallel()
 
-		f := NewFormatter(FormatWithTrace(), FormatWithInnerFirst(), FormatWithoutExternal())
+		f := NewFormatter(FormatterWithTrace(), FormatterWithInnerFirst(), FormatterWithoutExternal())
 
 		assert.True(t, f.options.WithTrace)
-		assert.True(t, f.options.IsInnerFirst)
+		assert.True(t, f.options.InnerFirst)
 		assert.False(t, f.options.WithExternal)
 	})
 }
@@ -39,20 +41,20 @@ func TestNewFormatter(t *testing.T) {
 func TestFormatterOptionConstructors(t *testing.T) {
 	t.Parallel()
 
-	f := NewFormatter(FormatWithTrace(), FormatWithInnerFirst(), FormatWithoutExternal(), FormatWithInvertedTrace())
+	f := NewFormatter(FormatterWithTrace(), FormatterWithInnerFirst(), FormatterWithoutExternal(), FormatterWithInvertedTrace())
 
 	assert.True(t, f.options.WithTrace)
-	assert.True(t, f.options.IsInnerFirst)
+	assert.True(t, f.options.InnerFirst)
 	assert.False(t, f.options.WithExternal)
 	assert.True(t, f.options.InvertTrace)
 }
 
-func TestFormatWithTrace(t *testing.T) {
+func TestFormatterWithTrace(t *testing.T) {
 	t.Parallel()
 
 	options := &FormatterOptions{}
 
-	FormatWithTrace()(options)
+	FormatterWithTrace()(options)
 
 	assert.True(t, options.WithTrace)
 }
@@ -67,10 +69,10 @@ func TestUnpack(t *testing.T) {
 
 		u := Unpack(nil)
 
-		assert.Empty(t, u.ErrRoot.Message)
-		assert.Empty(t, u.ErrChain)
-		require.NoError(t, u.ErrExternal)
-		assert.Nil(t, u.ErrJoined)
+		assert.Empty(t, u.Root.Message)
+		assert.Empty(t, u.Chain)
+		require.NoError(t, u.External)
+		assert.Nil(t, u.Joined)
 	})
 
 	t.Run("root error", func(t *testing.T) {
@@ -78,11 +80,11 @@ func TestUnpack(t *testing.T) {
 
 		u := Unpack(New("root", WithType("T"), WithField("k", "v")))
 
-		assert.Equal(t, "root", u.ErrRoot.Message)
-		assert.Equal(t, Type("T"), u.ErrRoot.Type)
-		assert.Equal(t, map[string]any{"k": "v"}, u.ErrRoot.Fields)
-		assert.NotEmpty(t, u.ErrRoot.Stack, "Unpack resolves stacks")
-		assert.Empty(t, u.ErrChain)
+		assert.Equal(t, "root", u.Root.Message)
+		assert.Equal(t, Type("T"), u.Root.Type)
+		assert.Equal(t, map[string]any{"k": "v"}, u.Root.Fields)
+		assert.NotEmpty(t, u.Root.Stack, "Unpack resolves stacks")
+		assert.Empty(t, u.Chain)
 	})
 
 	t.Run("wrapped chain", func(t *testing.T) {
@@ -90,10 +92,10 @@ func TestUnpack(t *testing.T) {
 
 		u := Unpack(Wrap(New("root"), "wrap"))
 
-		require.Len(t, u.ErrChain, 1)
-		assert.Equal(t, "wrap", u.ErrChain[0].Message)
-		assert.Len(t, u.ErrChain[0].Stack, 1)
-		assert.Equal(t, "root", u.ErrRoot.Message)
+		require.Len(t, u.Chain, 1)
+		assert.Equal(t, "wrap", u.Chain[0].Message)
+		assert.Len(t, u.Chain[0].Stack, 1)
+		assert.Equal(t, "root", u.Root.Message)
 	})
 
 	t.Run("external error", func(t *testing.T) {
@@ -101,9 +103,9 @@ func TestUnpack(t *testing.T) {
 
 		u := Unpack(stdErr)
 
-		assert.Equal(t, stdErr, u.ErrExternal)
-		assert.Empty(t, u.ErrRoot.Message)
-		assert.Empty(t, u.ErrChain)
+		assert.Equal(t, stdErr, u.External)
+		assert.Empty(t, u.Root.Message)
+		assert.Empty(t, u.Chain)
 	})
 
 	t.Run("wrapped external error", func(t *testing.T) {
@@ -111,8 +113,8 @@ func TestUnpack(t *testing.T) {
 
 		u := Unpack(Wrap(stdErr, "wrap"))
 
-		assert.Equal(t, "wrap", u.ErrRoot.Message)
-		assert.Equal(t, stdErr, u.ErrExternal)
+		assert.Equal(t, "wrap", u.Root.Message)
+		assert.Equal(t, stdErr, u.External)
 	})
 
 	t.Run("joined error", func(t *testing.T) {
@@ -120,8 +122,8 @@ func TestUnpack(t *testing.T) {
 
 		u := Unpack(Join(New("a"), New("b")))
 
-		require.Len(t, u.ErrJoined, 2)
-		assert.Empty(t, u.ErrChain)
+		require.Len(t, u.Joined, 2)
+		assert.Empty(t, u.Chain)
 	})
 }
 
@@ -134,9 +136,9 @@ func TestUnpackStopsAtFirstExternal(t *testing.T) {
 
 	u := Unpack(top)
 
-	assert.Equal(t, "top", u.ErrRoot.Message)
-	assert.Empty(t, u.ErrChain)
-	assert.Equal(t, mid, u.ErrExternal, "traversal stops at the first non-package error")
+	assert.Equal(t, "top", u.Root.Message)
+	assert.Empty(t, u.Chain)
+	assert.Equal(t, mid, u.External, "traversal stops at the first non-package error")
 }
 
 func TestUnpackResolveStacksGate(t *testing.T) {
@@ -147,11 +149,11 @@ func TestUnpackResolveStacksGate(t *testing.T) {
 	withStacks := unpack(err, true)
 	withoutStacks := unpack(err, false)
 
-	assert.NotEmpty(t, withStacks.ErrRoot.Stack)
-	assert.NotEmpty(t, withStacks.ErrChain[0].Stack)
+	assert.NotEmpty(t, withStacks.Root.Stack)
+	assert.NotEmpty(t, withStacks.Chain[0].Stack)
 
-	assert.Empty(t, withoutStacks.ErrRoot.Stack)
-	assert.Empty(t, withoutStacks.ErrChain[0].Stack)
+	assert.Empty(t, withoutStacks.Root.Stack)
+	assert.Empty(t, withoutStacks.Chain[0].Stack)
 }
 
 func TestToString(t *testing.T) {
@@ -198,7 +200,7 @@ func TestToString(t *testing.T) {
 		{
 			name:     "double wrap inner first",
 			err:      Wrap(Wrap(New("root"), "w1"), "w2"),
-			opts:     []FormatterOptionFunc{FormatWithInnerFirst()},
+			opts:     []FormatterOptionFunc{FormatterWithInnerFirst()},
 			expected: "root\n\nw1\n\nw2",
 		},
 		{
@@ -214,19 +216,19 @@ func TestToString(t *testing.T) {
 		{
 			name:     "root and external without external",
 			err:      Wrap(stdErr, "wrap"),
-			opts:     []FormatterOptionFunc{FormatWithoutExternal()},
+			opts:     []FormatterOptionFunc{FormatterWithoutExternal()},
 			expected: "wrap",
 		},
 		{
 			name:     "root and external inner first",
 			err:      Wrap(stdErr, "wrap"),
-			opts:     []FormatterOptionFunc{FormatWithInnerFirst()},
+			opts:     []FormatterOptionFunc{FormatterWithInnerFirst()},
 			expected: "ext\n\nwrap",
 		},
 		{
 			name:     "external only is shown even without external",
 			err:      stdErr,
-			opts:     []FormatterOptionFunc{FormatWithoutExternal()},
+			opts:     []FormatterOptionFunc{FormatterWithoutExternal()},
 			expected: "ext",
 		},
 		{
@@ -256,7 +258,7 @@ func TestToStringFieldsSorted(t *testing.T) {
 func TestToStringWithTrace(t *testing.T) {
 	t.Parallel()
 
-	out := ToString(Wrap(New("base"), "wrap"), FormatWithTrace())
+	out := ToString(Wrap(New("base"), "wrap"), FormatterWithTrace())
 
 	assert.Contains(t, out, "root Trace:")
 	assert.Contains(t, out, "wrap Trace:")
@@ -266,7 +268,7 @@ func TestToStringWithTrace(t *testing.T) {
 func TestToStringJoinedWithTrace(t *testing.T) {
 	t.Parallel()
 
-	out := ToString(Join(New("a"), New("b")), FormatWithTrace())
+	out := ToString(Join(New("a"), New("b")), FormatterWithTrace())
 
 	assert.Contains(t, out, "Multiple errors (2):")
 	assert.Contains(t, out, "Join Location:")
@@ -341,16 +343,35 @@ func TestToJSON(t *testing.T) {
 
 		m := ToJSON(Join(New("a"), New("b")))
 
-		assert.Equal(t, "joined", m["type"])
+		assert.Equal(t, "joined", m["kind"])
 		assert.Equal(t, 2, m["count"])
 		assert.Len(t, m["errors"], 2)
+	})
+
+	t.Run("root omitted when it has no content", func(t *testing.T) {
+		t.Parallel()
+
+		m := ToJSON(Wrap(stderrors.New("ext"), ""))
+
+		assert.NotContains(t, m, "root")
+		assert.NotContains(t, m, "chain")
+		assert.Contains(t, m, "external")
+	})
+
+	t.Run("external excluded via option", func(t *testing.T) {
+		t.Parallel()
+
+		m := ToJSON(Wrap(stderrors.New("ext"), "wrap"), FormatterWithoutExternal())
+
+		assert.NotContains(t, m, "external")
+		assert.Contains(t, m, "root")
 	})
 }
 
 func TestToJSONWithTrace(t *testing.T) {
 	t.Parallel()
 
-	m := ToJSON(New("trace me"), FormatWithTrace())
+	m := ToJSON(New("trace me"), FormatterWithTrace())
 
 	root, ok := m["root"].(map[string]any)
 	require.True(t, ok)
@@ -370,7 +391,7 @@ func TestToJSONWithTrace(t *testing.T) {
 func TestToJSONJoinedWithTrace(t *testing.T) {
 	t.Parallel()
 
-	m := ToJSON(Join(New("a"), New("b")), FormatWithTrace())
+	m := ToJSON(Join(New("a"), New("b")), FormatterWithTrace())
 
 	joinStack, ok := m["join_stack"].([]map[string]any)
 	require.True(t, ok)
@@ -416,7 +437,7 @@ func TestToJSONString(t *testing.T) {
 		err := Join(New("a"), New("b"))
 
 		expected := `{
-			"type": "joined",
+			"kind": "joined",
 			"count": 2,
 			"errors": [
 				{"root": {"message": "a"}},
@@ -441,8 +462,8 @@ func TestFormatterInvertTrace(t *testing.T) {
 
 	err := New("trace me")
 
-	normal := ToJSON(err, FormatWithTrace())
-	inverted := ToJSON(err, FormatWithTrace(), FormatWithInvertedTrace())
+	normal := ToJSON(err, FormatterWithTrace())
+	inverted := ToJSON(err, FormatterWithTrace(), FormatterWithInvertedTrace())
 
 	normalStack := normal["root"].(map[string]any)["stack"].([]map[string]any)
 	invertedStack := inverted["root"].(map[string]any)["stack"].([]map[string]any)
@@ -455,13 +476,13 @@ func TestFormatterInvertTrace(t *testing.T) {
 	}
 }
 
-func TestFormatterIsInnerFirstJSON(t *testing.T) {
+func TestFormatterInnerFirstJSON(t *testing.T) {
 	t.Parallel()
 
 	err := Wrap(Wrap(New("root"), "w1"), "w2")
 
 	normalChain := ToJSON(err)["chain"].([]map[string]any)
-	innerChain := ToJSON(err, FormatWithInnerFirst())["chain"].([]map[string]any)
+	innerChain := ToJSON(err, FormatterWithInnerFirst())["chain"].([]map[string]any)
 
 	require.Len(t, normalChain, 2)
 	require.Len(t, innerChain, 2)
@@ -480,6 +501,46 @@ func TestFormatterNil(t *testing.T) {
 
 	assert.Empty(t, f.String(nil))
 	assert.Nil(t, f.JSON(nil))
+}
+
+func TestZeroValueFormatter(t *testing.T) {
+	t.Parallel()
+
+	f := &Formatter{}
+
+	t.Run("string matches defaults", func(t *testing.T) {
+		t.Parallel()
+
+		err := Wrap(New("base", WithType("T"), WithField("k", "v")), "wrap")
+
+		assert.Equal(t, "wrap\n\n[T] base\n\nFields:\n  k: v", f.String(err))
+		assert.Equal(t, "ext", f.String(stderrors.New("ext")))
+		assert.Empty(t, f.String(nil))
+	})
+
+	t.Run("json matches defaults", func(t *testing.T) {
+		t.Parallel()
+
+		m := f.JSON(Wrap(New("root"), "wrap"))
+
+		chain, ok := m["chain"].([]map[string]any)
+		require.True(t, ok)
+		require.Len(t, chain, 1)
+		assert.Equal(t, "wrap", chain[0]["message"])
+
+		root, ok := m["root"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "root", root["message"])
+		assert.NotContains(t, root, "stack", "no stack without trace")
+
+		assert.Nil(t, f.JSON(nil))
+	})
+
+	t.Run("joined", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, "Multiple errors (2):\n\n1. a\n\n2. b", f.String(Join(New("a"), New("b"))))
+	})
 }
 
 func TestHasRootContent(t *testing.T) {
@@ -522,22 +583,22 @@ func TestIsOnlyExternal(t *testing.T) {
 	}{
 		{
 			name:     "external only",
-			unpacked: UnpackedError{ErrExternal: ext},
+			unpacked: UnpackedError{External: ext},
 			expected: true,
 		},
 		{
 			name:     "external with root",
-			unpacked: UnpackedError{ErrExternal: ext, ErrRoot: ErrPart{Message: "r"}},
+			unpacked: UnpackedError{External: ext, Root: ErrPart{Message: "r"}},
 			expected: false,
 		},
 		{
 			name:     "external with chain",
-			unpacked: UnpackedError{ErrExternal: ext, ErrChain: []ErrPart{{Message: "w"}}},
+			unpacked: UnpackedError{External: ext, Chain: []ErrPart{{Message: "w"}}},
 			expected: false,
 		},
 		{
 			name:     "no external",
-			unpacked: UnpackedError{ErrRoot: ErrPart{Message: "r"}},
+			unpacked: UnpackedError{Root: ErrPart{Message: "r"}},
 			expected: false,
 		},
 	}
@@ -557,7 +618,7 @@ func TestFormatExternalString(t *testing.T) {
 	ext := stderrors.New("boom")
 
 	assert.Equal(t, "boom", NewFormatter().formatExternalString(ext))
-	assert.Equal(t, "boom", NewFormatter(FormatWithTrace()).formatExternalString(ext))
+	assert.Equal(t, "boom", NewFormatter(FormatterWithTrace()).formatExternalString(ext))
 }
 
 func TestFormatterSpacingAndIndentation(t *testing.T) {
@@ -571,4 +632,147 @@ func TestFormatterSpacingAndIndentation(t *testing.T) {
 	})
 
 	assert.Equal(t, "[T]_boom\n\nFields:\n>>key:_value", out)
+}
+
+func TestFormatVerbs(t *testing.T) {
+	t.Parallel()
+
+	err := Wrap(New("base", WithType("T")), "wrap")
+
+	t.Run("percent v prints message", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, "wrap: base", formatf("%v", err))
+	})
+
+	t.Run("percent s prints message", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, "wrap: base", formatf("%s", err))
+	})
+
+	t.Run("percent q quotes message", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, `"wrap: base"`, formatf("%q", err))
+	})
+
+	t.Run("percent plus v includes traces", func(t *testing.T) {
+		t.Parallel()
+
+		out := formatf("%+v", err)
+
+		assert.Contains(t, out, "wrap Trace:")
+		assert.Contains(t, out, "root Trace:")
+		assert.Contains(t, out, "format_test.go")
+	})
+
+	t.Run("joined percent plus v", func(t *testing.T) {
+		t.Parallel()
+
+		out := formatf("%+v", Join(New("a"), New("b")))
+
+		assert.Contains(t, out, "Multiple errors (2):")
+		assert.Contains(t, out, "Join Location:")
+	})
+
+	t.Run("joined percent v prints messages", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, "a\nb", formatf("%v", Join(New("a"), New("b"))))
+	})
+
+	t.Run("joined percent q quotes messages", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, strconv.Quote("a\nb"), formatf("%q", Join(New("a"), New("b"))))
+	})
+}
+
+func formatf(verb string, err error) (out string) {
+	var buf strings.Builder
+
+	fmt.Fprintf(&buf, verb, err)
+
+	return buf.String()
+}
+
+func TestFormatNilReceivers(t *testing.T) {
+	t.Parallel()
+
+	var (
+		rootErr    *root
+		wrappedErr *wrapped
+		joinedErr  *joined
+	)
+
+	assert.NotPanics(t, func() {
+		assert.Equal(t, "<nil>", formatf("%v", rootErr))
+		assert.Equal(t, "<nil>", formatf("%+v", wrappedErr))
+		assert.Equal(t, "<nil>", formatf("%s", joinedErr))
+	})
+}
+
+func TestToStringNestedJoined(t *testing.T) {
+	t.Parallel()
+
+	out := ToString(Join(Join(New("a"), New("b")), New("c")))
+
+	assert.Equal(t, "Multiple errors (2):\n\n1. Multiple errors (2):\n\n1. a\n\n2. b\n\n2. c", out)
+}
+
+func TestToJSONNestedJoined(t *testing.T) {
+	t.Parallel()
+
+	m := ToJSON(Join(Join(New("a"), New("b")), New("c")))
+
+	assert.Equal(t, "joined", m["kind"])
+	assert.Equal(t, 2, m["count"])
+
+	errs, ok := m["errors"].([]any)
+	require.True(t, ok)
+	require.Len(t, errs, 2)
+
+	nested, ok := errs[0].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, "joined", nested["kind"])
+	assert.Equal(t, 2, nested["count"])
+}
+
+func TestJoinedFormattingWithoutCapturedTrace(t *testing.T) {
+	t.Parallel()
+
+	j := &joined{errs: []error{New("a"), New("b")}}
+
+	t.Run("string omits join location", func(t *testing.T) {
+		t.Parallel()
+
+		out := ToString(j, FormatterWithTrace())
+
+		assert.Contains(t, out, "Multiple errors (2):")
+		assert.NotContains(t, out, "Join Location:")
+	})
+
+	t.Run("json omits join stack", func(t *testing.T) {
+		t.Parallel()
+
+		m := ToJSON(j, FormatterWithTrace())
+
+		assert.NotContains(t, m, "join_stack")
+	})
+}
+
+func BenchmarkToString(b *testing.B) {
+	err := New("root error", WithField("root_key", "root_value"))
+
+	for i := 1; i < 16; i++ {
+		err = Wrap(err, fmt.Sprintf("wrap %d", i), WithField("wrap_key", i))
+	}
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		benchmarkString = ToString(err)
+	}
 }

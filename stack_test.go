@@ -10,20 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFrame_pc(t *testing.T) {
-	t.Parallel()
-
-	pc := [1]uintptr{}
-
-	runtime.Callers(1, pc[:])
-
-	f := frame(pc[0])
-
-	result := f.pc()
-
-	assert.Equal(t, pc[0]-1, result, "PC should be decremented by 1")
-}
-
 func TestFrame_resolveToStackFrame(t *testing.T) {
 	t.Parallel()
 
@@ -33,7 +19,7 @@ func TestFrame_resolveToStackFrame(t *testing.T) {
 
 	f := frame(pc[0])
 
-	frames := runtime.CallersFrames([]uintptr{pc[0] - 1})
+	frames := runtime.CallersFrames(pc[:])
 
 	runtimeFrame, _ := frames.Next()
 
@@ -70,8 +56,6 @@ func TestStack_resolveToStackFrames(t *testing.T) {
 	for {
 		runtimeFrame, more := frames.Next()
 
-		// resolveToStackFrames drops runtime-internal frames, so only
-		// non-runtime frames are compared against its output.
 		if !strings.HasPrefix(runtimeFrame.Function, "runtime.") {
 			require.Less(t, i, len(result), "More non-runtime frames from runtime than from resolveToStackFrames")
 
@@ -97,7 +81,7 @@ func TestCaller(t *testing.T) {
 
 	require.True(t, ok, "runtime.Caller failed")
 
-	result := caller(1)
+	result := caller(2)
 
 	require.NotNil(t, result, "caller returned nil")
 

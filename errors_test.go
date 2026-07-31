@@ -1,8 +1,10 @@
 package errors
 
 import (
-	"errors"
+	stderrors "errors"
 	"fmt"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 
@@ -92,6 +94,17 @@ func TestRootError(t *testing.T) {
 		assert.NotEmpty(t, pcs)
 	})
 
+	t.Run("stack", func(t *testing.T) {
+		t.Parallel()
+
+		err := New("error")
+
+		frames := err.(*root).Stack()
+
+		require.NotEmpty(t, frames)
+		assert.Contains(t, frames[0].Name, "TestRootError")
+	})
+
 	t.Run("nil receiver", func(t *testing.T) {
 		t.Parallel()
 
@@ -100,7 +113,7 @@ func TestRootError(t *testing.T) {
 		assert.Equal(t, "<nil>", nilErr.Error())
 		assert.Nil(t, nilErr.Fields())
 		assert.Empty(t, nilErr.StackFrames())
-		assert.False(t, nilErr.Is(errors.New("test")))
+		assert.False(t, nilErr.Is(stderrors.New("test")))
 	})
 }
 
@@ -120,7 +133,7 @@ func TestWrapError(t *testing.T) {
 	t.Run("wrapping non-package error", func(t *testing.T) {
 		t.Parallel()
 
-		stdErr := errors.New("standard error")
+		stdErr := stderrors.New("standard error")
 		wrappedErr := Wrap(stdErr, "wrapper")
 
 		require.Error(t, wrappedErr)
@@ -197,6 +210,17 @@ func TestWrapDoesNotMutateCause(t *testing.T) {
 
 		wg.Wait()
 	})
+
+	t.Run("wrapping with options does not mutate the cause", func(t *testing.T) {
+		t.Parallel()
+
+		base := New("base")
+
+		_ = Wrap(base, "ctx", WithType("WRAP"), WithField("wrap_key", "v"))
+
+		assert.Empty(t, base.(*root).Type())
+		assert.Nil(t, base.(*root).Fields())
+	})
 }
 
 func TestConcurrentFieldAccess(t *testing.T) {
@@ -208,14 +232,14 @@ func TestConcurrentFieldAccess(t *testing.T) {
 
 	for i := range 50 {
 		wg.Go(func() {
-			err.(*root).SetField(fmt.Sprintf("key-%d", i), i)
-			err.(*root).SetType(Type(fmt.Sprintf("TYPE_%d", i)))
+			_ = err.(*root).SetField(fmt.Sprintf("key-%d", i), i)
+			_ = err.(*root).SetType(Type(fmt.Sprintf("TYPE_%d", i)))
 		})
 
 		wg.Go(func() {
 			_ = err.(*root).Fields()
 			_ = err.(*root).Type()
-			_ = ToJSON(err, FormatWithTrace())
+			_ = ToJSON(err, FormatterWithTrace())
 			_ = ToString(err)
 		})
 	}
@@ -352,7 +376,7 @@ func TestIs(t *testing.T) {
 	err1a := Wrap(err1, "wrap 2")
 	err1b := Wrap(err1a, "wrap 3")
 
-	err2 := errors.New("2")
+	err2 := stderrors.New("2")
 	err2a := fmt.Errorf("wrap 2: %w", err1)
 
 	joinedErr := Join(err1, err2)
@@ -405,7 +429,6 @@ func TestAs(t *testing.T) {
 		match  bool
 	}{
 		{"nil error and target", nil, func() any { return nil }, false},
-		{"non-nil error nil target", err1, func() any { return nil }, false},
 		{"root to Error", err1, func() any { return new(Error) }, true},
 		{"root to *root", err1, func() any { return new(*root) }, true},
 		{"wrapped to *wrapped", err1a, func() any { return new(*wrapped) }, true},
@@ -569,6 +592,36 @@ func TestCause(t *testing.T) {
 
 		assert.Equal(t, joined, cause)
 	})
+
+	t.Run("cause through a foreign fmt wrap", func(t *testing.T) {
+		t.Parallel()
+
+		base := New("base")
+		foreign := fmt.Errorf("foreign ctx: %w", base)
+		top := Wrap(foreign, "top")
+
+		assert.Equal(t, base, Cause(top))
+	})
+
+	t.Run("cyclic unwrap chain terminates", func(t *testing.T) {
+		t.Parallel()
+
+		a := &cyclicError{}
+		b := &cyclicError{}
+		a.next = b
+		b.next = a
+
+		assert.Same(t, a, Cause(a), "a cycle back to a visited error must terminate")
+	})
+
+	t.Run("self-referential unwrap terminates", func(t *testing.T) {
+		t.Parallel()
+
+		a := &cyclicError{}
+		a.next = a
+
+		assert.Same(t, a, Cause(a))
+	})
 }
 
 func TestWrappedMethods(t *testing.T) {
@@ -606,6 +659,15 @@ func TestWrappedMethods(t *testing.T) {
 		t.Parallel()
 
 		assert.Len(t, newWrapped().StackFrames(), 1)
+	})
+
+	t.Run("stack", func(t *testing.T) {
+		t.Parallel()
+
+		frames := newWrapped().Stack()
+
+		require.Len(t, frames, 1)
+		assert.Contains(t, frames[0].Name, "TestWrappedMethods")
 	})
 
 	t.Run("is matching and non-matching", func(t *testing.T) {
@@ -707,6 +769,7 @@ func TestRootNilReceiver(t *testing.T) {
 	assert.Empty(t, e.Type())
 	assert.Equal(t, "<nil>", e.Error())
 	assert.Nil(t, e.Fields())
+	assert.Empty(t, e.Stack())
 	assert.Empty(t, e.StackFrames())
 	require.NoError(t, e.Unwrap())
 	assert.Nil(t, e.SetType("X"))
@@ -722,6 +785,7 @@ func TestWrappedNilReceiver(t *testing.T) {
 	assert.Empty(t, e.Type())
 	assert.Equal(t, "<nil>", e.Error())
 	assert.Nil(t, e.Fields())
+	assert.Empty(t, e.Stack())
 	assert.Empty(t, e.StackFrames())
 	require.NoError(t, e.Unwrap())
 	assert.Nil(t, e.SetType("X"))
@@ -734,6 +798,31 @@ func TestWrappedStackFramesNilFrame(t *testing.T) {
 	t.Parallel()
 
 	assert.Empty(t, (&wrapped{}).StackFrames(), "nil frame yields no frames")
+}
+
+func TestWrappedStackFramesSymbolizeLikeStack(t *testing.T) {
+	t.Parallel()
+
+	err := Wrap(New("base"), "ctx").(*wrapped)
+
+	pcs := err.StackFrames()
+	require.Len(t, pcs, 1)
+
+	runtimeFrame, _ := runtime.CallersFrames(pcs).Next()
+
+	expectedName := runtimeFrame.Function
+
+	if idx := strings.LastIndex(expectedName, "/"); idx >= 0 {
+		expectedName = expectedName[idx+1:]
+	}
+
+	frames := err.Stack()
+	require.Len(t, frames, 1)
+
+	assert.Equal(t, expectedName, frames[0].Name)
+	assert.Equal(t, runtimeFrame.File, frames[0].File)
+	assert.Equal(t, runtimeFrame.Line, frames[0].Line)
+	assert.Contains(t, frames[0].Name, "TestWrappedStackFramesSymbolizeLikeStack")
 }
 
 func TestFieldsReturnsCopy(t *testing.T) {
@@ -865,16 +954,24 @@ func TestRootIsAndAsEdgeCases(t *testing.T) {
 	})
 }
 
-func TestPackageAsInvalidTarget(t *testing.T) {
+func TestPackageAsPanicsOnInvalidTarget(t *testing.T) {
 	t.Parallel()
 
 	err := New("x")
 
-	assert.False(t, As(err, 42), "non-pointer target")
+	assert.PanicsWithValue(t, "errors: target cannot be nil", func() {
+		As(err, nil)
+	}, "nil target")
 
-	var notError int
+	assert.PanicsWithValue(t, "errors: target must be a non-nil pointer", func() {
+		As(err, 42)
+	}, "non-pointer target")
 
-	assert.False(t, As(err, &notError), "target type does not implement error")
+	assert.PanicsWithValue(t, "errors: *target must be interface or implement error", func() {
+		var notError int
+
+		As(err, &notError)
+	}, "target type does not implement error")
 }
 
 func TestAsResolverBranches(t *testing.T) {
@@ -896,7 +993,7 @@ func TestAsResolverBranches(t *testing.T) {
 		t.Parallel()
 
 		want := New("x", WithType("WANT")).(*root)
-		me := &multiError{errs: []error{nil, errors.New("other"), want}}
+		me := &multiError{errs: []error{nil, stderrors.New("other"), want}}
 
 		var target *root
 
@@ -907,7 +1004,7 @@ func TestAsResolverBranches(t *testing.T) {
 	t.Run("foreign multi-error no match", func(t *testing.T) {
 		t.Parallel()
 
-		me := &multiError{errs: []error{errors.New("a"), errors.New("b")}}
+		me := &multiError{errs: []error{stderrors.New("a"), stderrors.New("b")}}
 
 		var target *root
 
@@ -930,11 +1027,11 @@ func TestIsResolverBranches(t *testing.T) {
 	t.Run("foreign multi-error", func(t *testing.T) {
 		t.Parallel()
 
-		sentinel := errors.New("sentinel")
-		me := &multiError{errs: []error{errors.New("other"), sentinel}}
+		sentinel := stderrors.New("sentinel")
+		me := &multiError{errs: []error{stderrors.New("other"), sentinel}}
 
 		assert.True(t, Is(me, sentinel))
-		assert.False(t, Is(me, errors.New("missing")))
+		assert.False(t, Is(me, stderrors.New("missing")))
 	})
 }
 
@@ -989,6 +1086,18 @@ func (e *multiError) Unwrap() []error {
 	return e.errs
 }
 
+type cyclicError struct {
+	next *cyclicError
+}
+
+func (e *cyclicError) Error() string {
+	return "cyclic"
+}
+
+func (e *cyclicError) Unwrap() error {
+	return e.next
+}
+
 func TestWrapNilCauseWithOptions(t *testing.T) {
 	t.Parallel()
 
@@ -1008,7 +1117,7 @@ func TestIsConcurrentWithTargetSetType(t *testing.T) {
 
 		for range 50 {
 			wg.Go(func() {
-				target.(Error).SetType("B")
+				_ = target.(MutableError).SetType("B")
 			})
 
 			wg.Go(func() {
@@ -1029,7 +1138,7 @@ func TestIsConcurrentWithTargetSetType(t *testing.T) {
 
 		for range 50 {
 			wg.Go(func() {
-				target.(Error).SetType("B")
+				_ = target.(MutableError).SetType("B")
 			})
 
 			wg.Go(func() {
@@ -1061,6 +1170,7 @@ func TestErrorEmptyMessageWithCause(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, "inner", Wrap(New("inner"), "").Error(), "no leading colon for empty message")
+	assert.Equal(t, "ext", Wrap(stderrors.New("ext"), "").Error(), "no leading colon for empty message wrapping an external error")
 	assert.Equal(t, "outer: inner", Wrap(New("inner"), "outer").Error())
 }
 
@@ -1094,6 +1204,19 @@ func TestStackFramesReturnsCopy(t *testing.T) {
 
 		assert.Equal(t, original, err.StackFrames()[0], "mutating the returned slice must not affect the error")
 	})
+
+	t.Run("wrapped", func(t *testing.T) {
+		t.Parallel()
+
+		err := Wrap(New("base"), "ctx").(*wrapped)
+
+		frames := err.StackFrames()
+		require.Len(t, frames, 1)
+
+		frames[0] = 0
+
+		assert.NotZero(t, err.StackFrames()[0], "mutating the returned slice must not affect the error")
+	})
 }
 
 func TestNilOptionFuncsIgnored(t *testing.T) {
@@ -1104,4 +1227,206 @@ func TestNilOptionFuncsIgnored(t *testing.T) {
 		_ = Wrap(New("y"), "ctx", nil)
 		_ = NewFormatter(nil)
 	})
+}
+
+func TestStdlibInterop(t *testing.T) {
+	t.Parallel()
+
+	t.Run("stdlib Is traverses package chain", func(t *testing.T) {
+		t.Parallel()
+
+		base := New("base")
+		wrapped := Wrap(base, "ctx")
+
+		assert.ErrorIs(t, wrapped, base)
+	})
+
+	t.Run("stdlib Is uses package value comparison", func(t *testing.T) {
+		t.Parallel()
+
+		err := New("x", WithType("T"))
+		target := New("x", WithType("T"))
+
+		assert.ErrorIs(t, err, target)
+	})
+
+	t.Run("stdlib As recovers the Error interface", func(t *testing.T) {
+		t.Parallel()
+
+		var e Error
+
+		require.ErrorAs(t, Wrap(New("base"), "ctx"), &e)
+		assert.Equal(t, "ctx: base", e.Error())
+	})
+
+	t.Run("package Is traverses a foreign fmt wrap", func(t *testing.T) {
+		t.Parallel()
+
+		base := New("base")
+		foreign := fmt.Errorf("foreign ctx: %w", base)
+
+		assert.True(t, Is(foreign, base))
+	})
+
+	t.Run("package As traverses a foreign fmt wrap", func(t *testing.T) {
+		t.Parallel()
+
+		base := New("base")
+		foreign := fmt.Errorf("foreign ctx: %w", base)
+
+		var target *root
+
+		require.True(t, As(foreign, &target))
+		assert.Equal(t, base, target)
+	})
+}
+
+func TestRootIsTypeMatching(t *testing.T) {
+	t.Parallel()
+
+	typed := New("m", WithType("A")).(*root)
+	untyped := New("m").(*root)
+
+	t.Run("untyped target matches typed", func(t *testing.T) {
+		t.Parallel()
+
+		assert.True(t, typed.Is(untyped))
+	})
+
+	t.Run("typed target does not match untyped", func(t *testing.T) {
+		t.Parallel()
+
+		assert.False(t, untyped.Is(typed))
+	})
+
+	t.Run("different concrete type never matches", func(t *testing.T) {
+		t.Parallel()
+
+		assert.False(t, typed.Is(Wrap(New("m"), "ctx").(*wrapped)))
+	})
+}
+
+func TestAsMutableError(t *testing.T) {
+	t.Parallel()
+
+	err := Wrap(New("base"), "ctx")
+
+	var me MutableError
+
+	require.True(t, As(err, &me))
+
+	_ = me.SetType("LATE")
+	_ = me.SetField("late", true)
+
+	assert.Equal(t, Type("LATE"), me.Type())
+	assert.Equal(t, map[string]any{"late": true}, me.Fields())
+}
+
+func TestNestedJoin(t *testing.T) {
+	t.Parallel()
+
+	inner := Join(New("a"), New("b"))
+	c := New("c")
+	outer := Join(inner, c)
+
+	t.Run("error message flattens", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, "a\nb\nc", outer.Error())
+	})
+
+	t.Run("is traverses nesting", func(t *testing.T) {
+		t.Parallel()
+
+		assert.True(t, Is(outer, New("a")))
+	})
+
+	t.Run("as traverses nesting", func(t *testing.T) {
+		t.Parallel()
+
+		var target *root
+
+		assert.True(t, As(outer, &target))
+	})
+
+	t.Run("unwrap returns immediate members only", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, []error{inner, c}, outer.(*joined).Unwrap())
+	})
+}
+
+func TestNewCapturesAtMost64Frames(t *testing.T) {
+	t.Parallel()
+
+	var deep func(n int) error
+
+	deep = func(n int) error {
+		if n == 0 {
+			return New("deep")
+		}
+
+		return deep(n - 1)
+	}
+
+	pcs := deep(128).(*root).StackFrames()
+
+	assert.Len(t, pcs, 64, "capture is capped at 64 frames")
+}
+
+func TestSettersOverwrite(t *testing.T) {
+	t.Parallel()
+
+	err := New("x", WithType("A"), WithField("k", 1)).(*root)
+
+	_ = err.SetType("B")
+	_ = err.SetField("k", 2)
+
+	assert.Equal(t, Type("B"), err.Type())
+	assert.Equal(t, 2, err.Fields()["k"])
+}
+
+var (
+	benchmarkSink   any
+	benchmarkString string
+)
+
+// benchmarkWrapChain builds a wrap chain of the given total depth on top of a
+// root error: depth 1 is a bare root, depth 2 is one Wrap around a root, etc.
+func benchmarkWrapChain(depth int) (err error) {
+	err = New("root error")
+
+	for i := 1; i < depth; i++ {
+		err = Wrap(err, fmt.Sprintf("wrap %d", i))
+	}
+
+	return err
+}
+
+func BenchmarkNew(b *testing.B) {
+	b.ReportAllocs()
+
+	for b.Loop() {
+		benchmarkSink = New("benchmark error")
+	}
+}
+
+func BenchmarkErrorDeepChain(b *testing.B) {
+	err := benchmarkWrapChain(16)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		benchmarkString = err.Error()
+	}
+}
+
+func BenchmarkCause(b *testing.B) {
+	err := benchmarkWrapChain(16)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		benchmarkSink = Cause(err)
+	}
 }
