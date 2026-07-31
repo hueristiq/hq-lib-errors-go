@@ -762,3 +762,17 @@ func TestJoinedFormattingWithoutCapturedTrace(t *testing.T) {
 		assert.NotContains(t, m, "join_stack")
 	})
 }
+
+func BenchmarkToString(b *testing.B) {
+	err := New("root error", WithField("root_key", "root_value"))
+
+	for i := 1; i < 16; i++ {
+		err = Wrap(err, fmt.Sprintf("wrap %d", i), WithField("wrap_key", i))
+	}
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		benchmarkString = ToString(err)
+	}
+}

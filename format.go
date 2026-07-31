@@ -187,17 +187,32 @@ func (f *Formatter) formatPartString(part *ErrPart, kind string) string {
 		buf.WriteString("\n\nFields:")
 
 		for _, k := range slices.Sorted(maps.Keys(part.Fields)) {
-			fmt.Fprintf(&buf, "\n%s%s:%s%v", options.Indentation, k, options.Spacing, part.Fields[k])
+			buf.WriteString("\n")
+			buf.WriteString(options.Indentation)
+			buf.WriteString(k)
+			buf.WriteString(":")
+			buf.WriteString(options.Spacing)
+			fmt.Fprint(&buf, part.Fields[k])
 		}
 	}
 
 	if options.WithTrace && len(part.Stack) > 0 {
 		frames := part.Stack
 
-		fmt.Fprintf(&buf, "\n\n%s Trace:", kind)
+		buf.WriteString("\n\n")
+		buf.WriteString(kind)
+		buf.WriteString(" Trace:")
 
 		for _, frame := range frames {
-			fmt.Fprintf(&buf, "\n%s%s%s(%s:%d)", options.Indentation, frame.Name, options.Spacing, frame.File, frame.Line)
+			buf.WriteString("\n")
+			buf.WriteString(options.Indentation)
+			buf.WriteString(frame.Name)
+			buf.WriteString(options.Spacing)
+			buf.WriteString("(")
+			buf.WriteString(frame.File)
+			buf.WriteString(":")
+			buf.WriteString(strconv.Itoa(frame.Line))
+			buf.WriteString(")")
 		}
 	}
 
@@ -214,7 +229,11 @@ func (f *Formatter) formatPartString(part *ErrPart, kind string) string {
 //   - (string): the formatted string
 func (f *Formatter) formatExternalString(err error) string {
 	if f.optionsOrDefault().WithTrace {
-		return fmt.Sprintf("%+v", err)
+		var buf strings.Builder
+
+		fmt.Fprintf(&buf, "%+v", err)
+
+		return buf.String()
 	}
 
 	return err.Error()
@@ -233,7 +252,9 @@ func (f *Formatter) formatJoinedString(joinErr *joined) string {
 
 	var buf strings.Builder
 
-	fmt.Fprintf(&buf, "Multiple errors (%d):", len(joinErr.errs))
+	buf.WriteString("Multiple errors (")
+	buf.WriteString(strconv.Itoa(len(joinErr.errs)))
+	buf.WriteString("):")
 
 	if options.WithTrace && joinErr.trace != nil {
 		frames := joinErr.trace.resolveToStackFrames()
@@ -243,7 +264,15 @@ func (f *Formatter) formatJoinedString(joinErr *joined) string {
 
 			frame := frames[0]
 
-			fmt.Fprintf(&buf, "\n%s%s%s(%s:%d)", options.Indentation, frame.Name, options.Spacing, frame.File, frame.Line)
+			buf.WriteString("\n")
+			buf.WriteString(options.Indentation)
+			buf.WriteString(frame.Name)
+			buf.WriteString(options.Spacing)
+			buf.WriteString("(")
+			buf.WriteString(frame.File)
+			buf.WriteString(":")
+			buf.WriteString(strconv.Itoa(frame.Line))
+			buf.WriteString(")")
 		}
 	}
 
@@ -252,7 +281,10 @@ func (f *Formatter) formatJoinedString(joinErr *joined) string {
 			continue
 		}
 
-		fmt.Fprintf(&buf, "\n\n%d. %s", i+1, f.String(err))
+		buf.WriteString("\n\n")
+		buf.WriteString(strconv.Itoa(i + 1))
+		buf.WriteString(". ")
+		buf.WriteString(f.String(err))
 	}
 
 	return buf.String()
@@ -485,9 +517,17 @@ func defaultFormatterOptions() (options *FormatterOptions) {
 	}
 }
 
-// optionsOrDefault returns the formatter's options, falling back to the
-// NewFormatter defaults when they are nil — that is, when the Formatter was
-// not built by NewFormatter (for example a zero-value Formatter{}).
+// sharedDefaultOptions backs Formatter.optionsOrDefault for a Formatter that
+// carries no options of its own (a zero-value Formatter), so the fallback no
+// longer allocates on every call. It is shared and must never be mutated;
+// NewFormatter builds its own copy from defaultFormatterOptions before
+// applying option functions.
+var sharedDefaultOptions = defaultFormatterOptions()
+
+// optionsOrDefault returns the formatter's options, falling back to the shared
+// package-level defaults when they are nil — that is, when the Formatter was
+// not built by NewFormatter (for example a zero-value Formatter). The returned
+// defaults are shared; callers must not mutate them.
 //
 // Returns:
 //   - options (*FormatterOptions): the effective formatting options
@@ -496,7 +536,7 @@ func (f *Formatter) optionsOrDefault() (options *FormatterOptions) {
 		return f.options
 	}
 
-	return defaultFormatterOptions()
+	return sharedDefaultOptions
 }
 
 // FormatterWithTrace returns an option function to enable stack traces.
@@ -606,7 +646,7 @@ func unpack(err error, resolveStacks bool) (uerr UnpackedError) {
 				Fields:  e.Fields(),
 			}
 
-			if resolveStacks && e.frame != nil {
+			if resolveStacks && e.frame != 0 {
 				part.Stack = Stack{e.frame.resolveToStackFrame()}
 			}
 

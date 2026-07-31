@@ -121,9 +121,9 @@ func (s stack) resolveToStackFrames() (stackFrameObjects []StackFrame) {
 // This is useful for annotating errors with the exact call site in application code.
 // The skip parameter allows control over how many stack frames to ascend.
 //
-// It uses runtime.Callers to record the raw return PC, keeping every PC this
-// package stores on the same contract: passable to runtime.CallersFrames
-// without adjustment. If no valid caller is found, it returns nil.
+// It delegates to callerPC and heap-allocates the result; prefer callerPC where
+// a value suffices (PC 0 then signals "no frame"). If no valid caller is found,
+// it returns nil.
 //
 // Parameters:
 //   - skip (int): number of initial frames to omit, counted as for runtime.Callers
@@ -131,15 +131,36 @@ func (s stack) resolveToStackFrames() (stackFrameObjects []StackFrame) {
 // Returns:
 //   - (f *frame): pointer to the captured frame, or nil if no frames available
 func caller(skip int) (f *frame) {
-	var pcs [1]uintptr
-
-	if runtime.Callers(skip, pcs[:]) == 0 {
+	v := callerPC(skip + 1) // +1 skips this delegation frame
+	if v == 0 {
 		return nil
 	}
 
-	v := frame(pcs[0])
-
 	return &v
+}
+
+// callerPC captures the immediate caller's frame as a value, skipping over
+// internal frames. It is the allocation-free counterpart of caller, used on
+// the Wrap path so a wrapped error stays a single heap allocation.
+//
+// It uses runtime.Callers to record the raw return PC, keeping every PC this
+// package stores on the same contract: passable to runtime.CallersFrames
+// without adjustment. A zero return means no caller frame was available; PC 0
+// is never a valid program counter.
+//
+// Parameters:
+//   - skip (int): number of initial frames to omit, counted as for runtime.Callers
+//
+// Returns:
+//   - f (frame): the captured frame, or 0 if no frames are available
+func callerPC(skip int) (f frame) {
+	var pcs [1]uintptr
+
+	if runtime.Callers(skip, pcs[:]) == 0 {
+		return 0
+	}
+
+	return frame(pcs[0])
 }
 
 // callers captures the application call stack as raw program counters without
@@ -167,6 +188,7 @@ func callers(skip int) (s *stack) {
 	c := runtime.Callers(skip, PCs[:])
 
 	v := make(stack, 0, c)
+
 	v = append(v, PCs[:c]...)
 
 	return &v

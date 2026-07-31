@@ -1385,3 +1385,48 @@ func TestSettersOverwrite(t *testing.T) {
 	assert.Equal(t, Type("B"), err.Type())
 	assert.Equal(t, 2, err.Fields()["k"])
 }
+
+var (
+	benchmarkSink   any
+	benchmarkString string
+)
+
+// benchmarkWrapChain builds a wrap chain of the given total depth on top of a
+// root error: depth 1 is a bare root, depth 2 is one Wrap around a root, etc.
+func benchmarkWrapChain(depth int) (err error) {
+	err = New("root error")
+
+	for i := 1; i < depth; i++ {
+		err = Wrap(err, fmt.Sprintf("wrap %d", i))
+	}
+
+	return err
+}
+
+func BenchmarkNew(b *testing.B) {
+	b.ReportAllocs()
+
+	for b.Loop() {
+		benchmarkSink = New("benchmark error")
+	}
+}
+
+func BenchmarkErrorDeepChain(b *testing.B) {
+	err := benchmarkWrapChain(16)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		benchmarkString = err.Error()
+	}
+}
+
+func BenchmarkCause(b *testing.B) {
+	err := benchmarkWrapChain(16)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		benchmarkSink = Cause(err)
+	}
+}
