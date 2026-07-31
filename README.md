@@ -2,7 +2,7 @@
 
 ![made with go](https://img.shields.io/badge/made%20with-Go-1E90FF.svg) [![go reference](https://pkg.go.dev/badge/github.com/hueristiq/hq-lib-errors-go.svg)](https://pkg.go.dev/github.com/hueristiq/hq-lib-errors-go) [![license](https://img.shields.io/badge/license-MIT-gray.svg?color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/blob/main/LICENSE) ![maintenance](https://img.shields.io/badge/maintained%3F-yes-1E90FF.svg) [![open issues](https://img.shields.io/github/issues-raw/hueristiq/hq-lib-errors-go.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/issues?q=is:issue+is:open) [![closed issues](https://img.shields.io/github/issues-closed-raw/hueristiq/hq-lib-errors-go.svg?style=flat&color=1E90FF)](https://github.com/hueristiq/hq-lib-errors-go/issues?q=is:issue+is:closed) [![contribution](https://img.shields.io/badge/contributions-welcome-1E90FF.svg)](https://github.com/hueristiq/hq-lib-errors-go/blob/main/CONTRIBUTING.md)
 
-`hq-lib-errors-go` is a [Go](https://golang.org/) package for rich, structured error handling.
+`hq-lib-errors-go` is a [Go](https://golang.org/) package for, rich, structured error handling.
 
 ## Resources
 
@@ -24,7 +24,7 @@
 
 - **Stack Traces:** Every error captures where it was created.
 - **Classification:** Tag errors with a `Type` for programmatic handling.
-- **Structured Fields:** Attach arbitrary key-value metadata for richer debugging and structured logs.
+- **Structured Fields:** Attach key-value metadata for richer debugging and structured logs.
 - **Flexible Formatting:** Render an error chain as a human-readable string or a JSON-ready map.
 - **Multi-Error Aggregation:** `Join` combines several errors into one that unwraps to all of them and records where the join happened.
 
