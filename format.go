@@ -51,9 +51,9 @@ type ErrPart struct {
 // built by NewFormatter without options.
 //
 // Fields:
-//   - options (*FormatterOptions): the configuration options for formatting
+//   - options (*FormatOptions): the configuration options for formatting
 type Formatter struct {
-	options *FormatterOptions
+	options *FormatOptions
 }
 
 // String formats the error as a multi-line string.
@@ -88,8 +88,8 @@ func (f *Formatter) String(err error) (formatted string) {
 //	}
 //
 // "root" and "chain" are omitted when empty, and "external" when there is no
-// external error or it is excluded via [FormatterWithoutExternal]. "stack" appears only
-// with [FormatterWithTrace]. The schema for a joined error uses the "kind" key as its
+// external error or it is excluded via [FormatWithoutExternal]. "stack" appears only
+// with [FormatWithTrace]. The schema for a joined error uses the "kind" key as its
 // discriminator — "type" is reserved for the error classification:
 //
 //	{
@@ -455,7 +455,7 @@ func (f *Formatter) isOnlyExternal(unpacked *UnpackedError) bool {
 	return unpacked.External != nil && unpacked.Root.Message == "" && len(unpacked.Chain) == 0
 }
 
-// FormatterOptions holds configuration for the Formatter.
+// FormatOptions holds configuration for the Formatter.
 // It controls aspects like order, trace inclusion, and formatting style.
 //
 // Fields:
@@ -465,7 +465,7 @@ func (f *Formatter) isOnlyExternal(unpacked *UnpackedError) bool {
 //   - WithExternal (bool): include external errors (default: true)
 //   - Spacing (string): spacing between elements (default: " ")
 //   - Indentation (string): indentation for nested elements (default: "  ")
-type FormatterOptions struct {
+type FormatOptions struct {
 	InnerFirst   bool
 	WithTrace    bool
 	InvertTrace  bool
@@ -474,21 +474,21 @@ type FormatterOptions struct {
 	Indentation  string
 }
 
-// FormatterOptionFunc is a function type for configuring FormatterOptions.
-// Used with NewFormatter to set custom options. A nil FormatterOptionFunc is
+// FormatOptionFunc is a function type for configuring FormatOptions.
+// Used with NewFormatter to set custom options. A nil FormatOptionFunc is
 // ignored.
-type FormatterOptionFunc func(options *FormatterOptions)
+type FormatOptionFunc func(options *FormatOptions)
 
 // NewFormatter creates a new Formatter with default or custom options.
 // Defaults: outer-first, no trace, no invert, include external, space " ", indent "  ".
 //
 // Parameters:
-//   - ofs (...FormatterOptionFunc): variadic option functions
+//   - ofs (...FormatOptionFunc): variadic option functions
 //
 // Returns:
 //   - formatter (*Formatter): the new formatter instance
-func NewFormatter(ofs ...FormatterOptionFunc) (formatter *Formatter) {
-	options := defaultFormatterOptions()
+func NewFormatter(ofs ...FormatOptionFunc) (formatter *Formatter) {
+	options := defaultFormatOptions()
 
 	for _, f := range ofs {
 		if f != nil {
@@ -501,13 +501,13 @@ func NewFormatter(ofs ...FormatterOptionFunc) (formatter *Formatter) {
 	}
 }
 
-// defaultFormatterOptions returns the options NewFormatter starts from:
+// defaultFormatOptions returns the options NewFormatter starts from:
 // outer-first, no trace, no invert, include external, space " ", indent "  ".
 //
 // Returns:
-//   - options (*FormatterOptions): the default formatting options
-func defaultFormatterOptions() (options *FormatterOptions) {
-	return &FormatterOptions{
+//   - options (*FormatOptions): the default formatting options
+func defaultFormatOptions() (options *FormatOptions) {
+	return &FormatOptions{
 		InnerFirst:   false,
 		WithTrace:    false,
 		InvertTrace:  false,
@@ -520,9 +520,9 @@ func defaultFormatterOptions() (options *FormatterOptions) {
 // sharedDefaultOptions backs Formatter.optionsOrDefault for a Formatter that
 // carries no options of its own (a zero-value Formatter), so the fallback no
 // longer allocates on every call. It is shared and must never be mutated;
-// NewFormatter builds its own copy from defaultFormatterOptions before
+// NewFormatter builds its own copy from defaultFormatOptions before
 // applying option functions.
-var sharedDefaultOptions = defaultFormatterOptions()
+var sharedDefaultOptions = defaultFormatOptions()
 
 // optionsOrDefault returns the formatter's options, falling back to the shared
 // package-level defaults when they are nil — that is, when the Formatter was
@@ -530,8 +530,8 @@ var sharedDefaultOptions = defaultFormatterOptions()
 // defaults are shared; callers must not mutate them.
 //
 // Returns:
-//   - options (*FormatterOptions): the effective formatting options
-func (f *Formatter) optionsOrDefault() (options *FormatterOptions) {
+//   - options (*FormatOptions): the effective formatting options
+func (f *Formatter) optionsOrDefault() (options *FormatOptions) {
 	if f.options != nil {
 		return f.options
 	}
@@ -539,47 +539,47 @@ func (f *Formatter) optionsOrDefault() (options *FormatterOptions) {
 	return sharedDefaultOptions
 }
 
-// FormatterWithTrace returns an option function to enable stack traces.
+// FormatWithTrace returns an option function to enable stack traces.
 //
 // Returns:
-//   - f (FormatterOptionFunc): configuration function for NewFormatter
-func FormatterWithTrace() (f FormatterOptionFunc) {
-	return func(options *FormatterOptions) {
+//   - f (FormatOptionFunc): configuration function for NewFormatter
+func FormatWithTrace() (f FormatOptionFunc) {
+	return func(options *FormatOptions) {
 		options.WithTrace = true
 	}
 }
 
-// FormatterWithInnerFirst returns an option function that formats the error
+// FormatWithInnerFirst returns an option function that formats the error
 // chain from the innermost cause outward (the default is outermost first).
 //
 // Returns:
-//   - f (FormatterOptionFunc): configuration function for NewFormatter
-func FormatterWithInnerFirst() (f FormatterOptionFunc) {
-	return func(options *FormatterOptions) {
+//   - f (FormatOptionFunc): configuration function for NewFormatter
+func FormatWithInnerFirst() (f FormatOptionFunc) {
+	return func(options *FormatOptions) {
 		options.InnerFirst = true
 	}
 }
 
-// FormatterWithInvertedTrace returns an option function that renders stack
+// FormatWithInvertedTrace returns an option function that renders stack
 // traces with the most recent call last (the default is most recent call
 // first).
 //
 // Returns:
-//   - f (FormatterOptionFunc): configuration function for NewFormatter
-func FormatterWithInvertedTrace() (f FormatterOptionFunc) {
-	return func(options *FormatterOptions) {
+//   - f (FormatOptionFunc): configuration function for NewFormatter
+func FormatWithInvertedTrace() (f FormatOptionFunc) {
+	return func(options *FormatOptions) {
 		options.InvertTrace = true
 	}
 }
 
-// FormatterWithoutExternal returns an option function that omits external
+// FormatWithoutExternal returns an option function that omits external
 // (non-package) errors from the output, unless the error consists solely of an
 // external error.
 //
 // Returns:
-//   - f (FormatterOptionFunc): configuration function for NewFormatter
-func FormatterWithoutExternal() (f FormatterOptionFunc) {
-	return func(options *FormatterOptions) {
+//   - f (FormatOptionFunc): configuration function for NewFormatter
+func FormatWithoutExternal() (f FormatOptionFunc) {
+	return func(options *FormatOptions) {
 		options.WithExternal = false
 	}
 }
@@ -598,7 +598,7 @@ func FormatterWithoutExternal() (f FormatterOptionFunc) {
 //
 // Unlike a Formatter with traces disabled, Unpack always symbolizes stack PCs
 // into frames, which is the expensive part of decomposition. Prefer
-// [ToString]/[ToJSON] without [FormatterWithTrace] when traces are not needed.
+// [FormatToString]/[FormatToJSON] without [FormatWithTrace] when traces are not needed.
 //
 // Parameters:
 //   - err (error): the error to unpack
@@ -663,16 +663,16 @@ func unpack(err error, resolveStacks bool) (uerr UnpackedError) {
 	return uerr
 }
 
-// ToString is a convenience function to format an error as a string.
+// FormatToString is a convenience function to format an error as a string.
 // It creates a formatter with options and calls String.
 //
 // Parameters:
 //   - err (error): the error to format
-//   - ofs (...FormatterOptionFunc): optional configuration
+//   - ofs (...FormatOptionFunc): optional configuration
 //
 // Returns:
 //   - formatted (string): the formatted string
-func ToString(err error, ofs ...FormatterOptionFunc) (formatted string) {
+func FormatToString(err error, ofs ...FormatOptionFunc) (formatted string) {
 	formatter := NewFormatter(ofs...)
 
 	formatted = formatter.String(err)
@@ -680,17 +680,17 @@ func ToString(err error, ofs ...FormatterOptionFunc) (formatted string) {
 	return
 }
 
-// ToJSON is a convenience function to format an error as a JSON map.
+// FormatToJSON is a convenience function to format an error as a JSON map.
 // It creates a formatter with options and calls [Formatter.JSON]; see that
 // method's documentation for the resulting schema.
 //
 // Parameters:
 //   - err (error): the error to format
-//   - ofs (...FormatterOptionFunc): optional configuration
+//   - ofs (...FormatOptionFunc): optional configuration
 //
 // Returns:
 //   - formatted (map[string]any): the formatted map
-func ToJSON(err error, ofs ...FormatterOptionFunc) (formatted map[string]any) {
+func FormatToJSON(err error, ofs ...FormatOptionFunc) (formatted map[string]any) {
 	formatter := NewFormatter(ofs...)
 
 	formatted = formatter.JSON(err)
@@ -698,17 +698,17 @@ func ToJSON(err error, ofs ...FormatterOptionFunc) (formatted map[string]any) {
 	return
 }
 
-// ToJSONString is a convenience function to format an error as a JSON string.
-// It uses ToJSON and marshals with indentation.
+// FormatToJSONString is a convenience function to format an error as a JSON string.
+// It uses FormatToJSON and marshals with indentation.
 //
 // Parameters:
 //   - err (error): the error to format
-//   - ofs (...FormatterOptionFunc): optional configuration
+//   - ofs (...FormatOptionFunc): optional configuration
 //
 // Returns:
 //   - formatted (string): the JSON string, or error message if marshaling fails
-func ToJSONString(err error, ofs ...FormatterOptionFunc) (formatted string) {
-	data := ToJSON(err, ofs...)
+func FormatToJSONString(err error, ofs ...FormatOptionFunc) (formatted string) {
+	data := FormatToJSON(err, ofs...)
 	if data == nil {
 		return
 	}
@@ -728,7 +728,7 @@ func ToJSONString(err error, ofs ...FormatterOptionFunc) (formatted string) {
 // formatError writes err to s following the fmt.Formatter conventions shared
 // by this package's error types: %v and %s write the error message, %q writes
 // the quoted message, and %+v writes the full formatted chain with stack
-// traces, equivalent to ToString(err, FormatterWithTrace()).
+// traces, equivalent to FormatToString(err, FormatWithTrace()).
 //
 // Parameters:
 //   - s (fmt.State): the state to write to
@@ -738,7 +738,7 @@ func formatError(s fmt.State, verb rune, err error) {
 	switch verb {
 	case 'v':
 		if s.Flag('+') {
-			_, _ = io.WriteString(s, ToString(err, FormatterWithTrace()))
+			_, _ = io.WriteString(s, FormatToString(err, FormatWithTrace()))
 
 			return
 		}
@@ -753,7 +753,7 @@ func formatError(s fmt.State, verb rune, err error) {
 
 // Format implements [fmt.Formatter]: %v and %s print the error message, %q
 // prints it quoted, and %+v prints the full chain with stack traces (see
-// [ToString] with [FormatterWithTrace]).
+// [FormatToString] with [FormatWithTrace]).
 func (e *root) Format(s fmt.State, verb rune) {
 	if e == nil {
 		_, _ = io.WriteString(s, "<nil>")
@@ -766,7 +766,7 @@ func (e *root) Format(s fmt.State, verb rune) {
 
 // Format implements [fmt.Formatter]: %v and %s print the error message, %q
 // prints it quoted, and %+v prints the full chain with stack traces (see
-// [ToString] with [FormatterWithTrace]).
+// [FormatToString] with [FormatWithTrace]).
 func (e *wrapped) Format(s fmt.State, verb rune) {
 	if e == nil {
 		_, _ = io.WriteString(s, "<nil>")
@@ -779,8 +779,8 @@ func (e *wrapped) Format(s fmt.State, verb rune) {
 
 // Format implements [fmt.Formatter]: %v and %s print the error messages joined
 // by newlines, %q prints them quoted, and %+v prints the full multi-error
-// rendering with the join location and stack traces (see [ToString] with
-// [FormatterWithTrace]).
+// rendering with the join location and stack traces (see [FormatToString] with
+// [FormatWithTrace]).
 func (e *joined) Format(s fmt.State, verb rune) {
 	if e == nil {
 		_, _ = io.WriteString(s, "<nil>")

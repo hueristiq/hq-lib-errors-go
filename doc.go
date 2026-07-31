@@ -68,11 +68,11 @@
 //
 // # Formatting
 //
-// [ToString], [ToJSON], and [ToJSONString] render an error chain for logs or
+// [FormatToString], [FormatToJSON], and [FormatToJSONString] render an error chain for logs or
 // structured output. Stack traces are omitted by default; enable them with the
-// [FormatterWithTrace] option:
+// [FormatWithTrace] option:
 //
-//	fmt.Println(errors.ToString(err, errors.FormatterWithTrace()))
+//	fmt.Println(errors.FormatToString(err, errors.FormatWithTrace()))
 //
 // Errors also implement [fmt.Formatter]: %v and %s print the error message, %q
 // prints it quoted, and %+v prints the full chain with stack traces, so
