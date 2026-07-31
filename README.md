@@ -180,7 +180,7 @@ These mirror the standard library and traverse the whole chain, including the br
 
 ### Formatting Errors
 
-`ToString`, `ToJSON`, and `ToJSONString` render an error chain. Stack traces are **omitted by default**; enable them with the `FormatterWithTrace` option. Package errors also implement `fmt.Formatter`, so `fmt.Printf("%+v", err)` prints the full chain with traces. For finer control over ordering, indentation, and trace inclusion, build a `Formatter` with `NewFormatter`.
+`FormatToString`, `FormatToJSON`, and `FormatToJSONString` render an error chain. Stack traces are **omitted by default**; enable them with the `FormatWithTrace` option. Package errors also implement `fmt.Formatter`, so `fmt.Printf("%+v", err)` prints the full chain with traces. For finer control over ordering, indentation, and trace inclusion, build a `Formatter` with `NewFormatter`.
 
 #### ... to String
 
@@ -199,7 +199,7 @@ func main() {
 	err = hqgoerrors.Wrap(err, "wrap error example 1!")
 	err = hqgoerrors.Wrap(err, "wrap error example 2!", hqgoerrors.WithType("ERROR_TYPE_2"), hqgoerrors.WithField("FIELD_KEY_1", "FIELD_VALUE_1"), hqgoerrors.WithField("FIELD_KEY_2", "FIELD_VALUE_2"))
 
-	formattedStr := hqgoerrors.ToString(err, hqgoerrors.FormatterWithTrace())
+	formattedStr := hqgoerrors.FormatToString(err, hqgoerrors.FormatWithTrace())
 
 	fmt.Println(formattedStr)
 }
@@ -234,7 +234,7 @@ root Trace:
 
 #### ... to JSON
 
-`ToJSON` returns a `map[string]any` ready for `json.Marshal`; `ToJSONString` marshals it for you with indentation.
+`FormatToJSON` returns a `map[string]any` ready for `json.Marshal`; `FormatToJSONString` marshals it for you with indentation.
 
 ```go
 package main
@@ -251,7 +251,7 @@ func main() {
 	err = hqgoerrors.Wrap(err, "wrap error example 1!")
 	err = hqgoerrors.Wrap(err, "wrap error example 2!", hqgoerrors.WithType("ERROR_TYPE_2"), hqgoerrors.WithField("FIELD_KEY_1", "FIELD_VALUE_1"), hqgoerrors.WithField("FIELD_KEY_2", "FIELD_VALUE_2"))
 
-	formattedJSON := hqgoerrors.ToJSONString(err, hqgoerrors.FormatterWithTrace())
+	formattedJSON := hqgoerrors.FormatToJSONString(err, hqgoerrors.FormatWithTrace())
 
 	fmt.Println(formattedJSON)
 }

@@ -239,8 +239,8 @@ func TestConcurrentFieldAccess(t *testing.T) {
 		wg.Go(func() {
 			_ = err.(*root).Fields()
 			_ = err.(*root).Type()
-			_ = ToJSON(err, FormatterWithTrace())
-			_ = ToString(err)
+			_ = FormatToJSON(err, FormatWithTrace())
+			_ = FormatToString(err)
 		})
 	}
 
