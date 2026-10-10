@@ -741,18 +741,30 @@ type Type string
 // OptionFunc is ignored.
 type OptionFunc func(err MutableError)
 
-// Compile-time assertions that the concrete error types satisfy their intended
-// interfaces. root and wrapped implement the full MutableError interface;
-// joined implements only the standard error interface (it carries no type or
-// fields); all three implement fmt.Formatter for %-verb printing.
 var (
-	_ Error         = (*root)(nil)
-	_ MutableError  = (*root)(nil)
+	// Compile-time guard ensuring [root] satisfies [Error].
+	_ Error = (*root)(nil)
+
+	// Compile-time guard ensuring [root] satisfies [MutableError].
+	_ MutableError = (*root)(nil)
+
+	// Compile-time guard ensuring [root] satisfies [fmt.Formatter].
 	_ fmt.Formatter = (*root)(nil)
-	_ Error         = (*wrapped)(nil)
-	_ MutableError  = (*wrapped)(nil)
+
+	// Compile-time guard ensuring [wrapped] satisfies [Error].
+	_ Error = (*wrapped)(nil)
+
+	// Compile-time guard ensuring [wrapped] satisfies [MutableError].
+	_ MutableError = (*wrapped)(nil)
+
+	// Compile-time guard ensuring [wrapped] satisfies [fmt.Formatter].
 	_ fmt.Formatter = (*wrapped)(nil)
-	_ error         = (*joined)(nil)
+
+	// Compile-time guard ensuring [joined] satisfies [error]. joined carries
+	// no type or fields, so it deliberately does not implement [Error].
+	_ error = (*joined)(nil)
+
+	// Compile-time guard ensuring [joined] satisfies [fmt.Formatter].
 	_ fmt.Formatter = (*joined)(nil)
 )
 
