@@ -117,31 +117,10 @@ func (s stack) resolveToStackFrames() (stackFrameObjects []StackFrame) {
 	return stackFrameObjects
 }
 
-// caller captures the immediate caller's frame, skipping over internal frames.
-// This is useful for annotating errors with the exact call site in application code.
-// The skip parameter allows control over how many stack frames to ascend.
-//
-// It delegates to callerPC and heap-allocates the result; prefer callerPC where
-// a value suffices (PC 0 then signals "no frame"). If no valid caller is found,
-// it returns nil.
-//
-// Parameters:
-//   - skip (int): number of initial frames to omit, counted as for runtime.Callers
-//
-// Returns:
-//   - (f *frame): pointer to the captured frame, or nil if no frames available
-func caller(skip int) (f *frame) {
-	v := callerPC(skip + 1) // +1 skips this delegation frame
-	if v == 0 {
-		return nil
-	}
-
-	return &v
-}
-
 // callerPC captures the immediate caller's frame as a value, skipping over
-// internal frames. It is the allocation-free counterpart of caller, used on
-// the Wrap path so a wrapped error stays a single heap allocation.
+// internal frames. It is used on the Wrap path, where capturing a single frame
+// as a value (rather than heap-allocating one) keeps a wrapped error down to a
+// single heap allocation.
 //
 // It uses runtime.Callers to record the raw return PC, keeping every PC this
 // package stores on the same contract: passable to runtime.CallersFrames

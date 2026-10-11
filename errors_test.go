@@ -902,12 +902,31 @@ func TestJoinedMethods(t *testing.T) {
 		assert.False(t, e.Is(nil))
 	})
 
+	t.Run("is nil receiver", func(t *testing.T) {
+		t.Parallel()
+
+		var e *joined
+
+		assert.False(t, e.Is(New("a")))
+		assert.False(t, e.Is(nil))
+	})
+
 	t.Run("is no match", func(t *testing.T) {
 		t.Parallel()
 
 		e := Join(New("a"), New("b")).(*joined)
 
 		assert.False(t, e.Is(New("c")))
+	})
+
+	t.Run("as nil receiver", func(t *testing.T) {
+		t.Parallel()
+
+		var e *joined
+
+		var target *customAsError
+
+		assert.False(t, e.As(&target))
 	})
 
 	t.Run("as no match", func(t *testing.T) {

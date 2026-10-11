@@ -74,26 +74,24 @@ func TestStack_resolveToStackFrames(t *testing.T) {
 	assert.Len(t, result, i, "Should have one frame per non-runtime input PC")
 }
 
-func TestCaller(t *testing.T) {
+func TestCallerPC(t *testing.T) {
 	t.Parallel()
 
 	_, file, line, ok := runtime.Caller(0)
 
 	require.True(t, ok, "runtime.Caller failed")
 
-	result := caller(2)
+	result := callerPC(2)
 
-	require.NotNil(t, result, "caller returned nil")
+	require.NotZero(t, result, "callerPC returned 0")
 
 	resolved := result.resolveToStackFrame()
 
-	assert.Equal(t, "TestCaller", strings.Split(resolved.Name, ".")[1])
+	assert.Equal(t, "TestCallerPC", strings.Split(resolved.Name, ".")[1])
 	assert.Equal(t, file, resolved.File)
 	assert.Greater(t, resolved.Line, line)
 
-	nilResult := caller(1000)
-
-	assert.Nil(t, nilResult)
+	assert.Zero(t, callerPC(1000))
 }
 
 func TestCallers(t *testing.T) {

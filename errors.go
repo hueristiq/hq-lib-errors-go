@@ -642,10 +642,15 @@ func (e *joined) StackFrames() (pcs []uintptr) {
 //   - target (error): the error to compare against
 //
 // Returns:
-//   - matches (bool): true if any joined error matches the target
+//   - matches (bool): true if any joined error matches the target, or false if
+//     the receiver or target is nil
 func (e *joined) Is(target error) (matches bool) {
+	if e == nil {
+		return
+	}
+
 	if target == nil {
-		return e == nil
+		return false
 	}
 
 	for _, err := range e.errs {
@@ -663,8 +668,13 @@ func (e *joined) Is(target error) (matches bool) {
 //   - target (any): pointer to interface or concrete type
 //
 // Returns:
-//   - ok (bool): true if any joined error was successfully assigned
+//   - ok (bool): true if any joined error was successfully assigned, or false
+//     if the receiver is nil
 func (e *joined) As(target any) (ok bool) {
+	if e == nil {
+		return
+	}
+
 	for _, err := range e.errs {
 		if As(err, target) {
 			return true
@@ -700,7 +710,7 @@ type Error interface {
 	Type() (errType Type)
 
 	// Fields returns a snapshot copy of the error's structured fields.
-	Fields() (fields map[string]interface{})
+	Fields() (fields map[string]any)
 
 	// Stack returns the captured call stack as resolved frames, most recent
 	// call first. Resolution from raw PCs happens at call time.
@@ -727,12 +737,12 @@ type MutableError interface {
 	SetType(errType Type) (err MutableError)
 
 	// SetField adds a key-value field and returns the error for chaining.
-	SetField(key string, value interface{}) (err MutableError)
+	SetField(key string, value any) (err MutableError)
 }
 
 // Type is a classification label for an error, letting callers categorize and
 // branch on errors by kind (for example "PaymentError" or "NotFound") rather
-// than by message. Set it with [WithType] or [Error.SetType] and read it with
+// than by message. Set it with [WithType] or [MutableError.SetType] and read it with
 // [Error.Type]. The empty Type means unclassified.
 type Type string
 
